@@ -58,6 +58,7 @@ import static reactor.core.Fuseable.NONE;
  */
 public abstract class Operators {
 
+	//TODO put default to an actually useful value (to be determined empirically?)
 	/**
 	 * The maximum number of subsequent Reactor core operators (operator depth) that should be chained before trampolining occurs.
 	 * <p>
@@ -101,6 +102,7 @@ public abstract class Operators {
 		<U> CoreSubscriber<U> tryTrampoline(CoreSubscriber<U> actual) {
 			CoreSubscriber<U> result = actual;
 			//TODO test the behavior with thread-hopping and blocking flatmaps
+			//TODO check that this is actually useful. if so, consider introducing marker interface instead
 			if (actual instanceof FluxPublishOn.PublishOnSubscriber
 					|| actual instanceof MonoPublishOn.PublishOnSubscriber
 					|| actual instanceof FluxSubscribeOn.SubscribeOnSubscriber
