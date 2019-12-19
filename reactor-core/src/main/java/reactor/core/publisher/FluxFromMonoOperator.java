@@ -61,6 +61,7 @@ abstract class FluxFromMonoOperator<I, O> extends Flux<O> implements Scannable,
 	@Override
 	@SuppressWarnings("unchecked")
 	public final void subscribe(CoreSubscriber<? super O> subscriber) {
+		Operators.Trampoline trampoline = new Operators.Trampoline();
 		OptimizableOperator operator = this;
 		while (true) {
 			subscriber = operator.subscribeOrReturn(subscriber);
@@ -68,6 +69,9 @@ abstract class FluxFromMonoOperator<I, O> extends Flux<O> implements Scannable,
 				// null means "I will subscribe myself", returning...
 				return;
 			}
+
+			subscriber = trampoline.tryTrampoline(subscriber);
+
 			OptimizableOperator newSource = operator.nextOptimizableSource();
 			if (newSource == null) {
 				operator.source().subscribe(subscriber);

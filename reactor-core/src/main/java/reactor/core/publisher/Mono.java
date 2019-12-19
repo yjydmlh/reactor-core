@@ -4081,6 +4081,7 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	@Override
 	@SuppressWarnings("unchecked")
 	public final void subscribe(Subscriber<? super T> actual) {
+		Operators.Trampoline trampoline = new Operators.Trampoline();
 		CorePublisher publisher = Operators.onLastAssembly(this);
 		CoreSubscriber subscriber = Operators.toCoreSubscriber(actual);
 
@@ -4092,6 +4093,8 @@ public abstract class Mono<T> implements CorePublisher<T> {
 					// null means "I will subscribe myself", returning...
 					return;
 				}
+
+				subscriber = trampoline.tryTrampoline(subscriber);
 
 				OptimizableOperator newSource = operator.nextOptimizableSource();
 				if (newSource == null) {

@@ -18,9 +18,11 @@ package reactor.core.publisher;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -28,10 +30,12 @@ import org.reactivestreams.Subscription;
 import reactor.core.CoreSubscriber;
 import reactor.core.Fuseable;
 import reactor.core.Scannable;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.MockUtils;
 import reactor.test.publisher.FluxOperatorTest;
 import reactor.test.subscriber.AssertSubscriber;
+import reactor.util.annotation.Nullable;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -487,4 +491,114 @@ public class FluxMapTest extends FluxOperatorTest<String, String> {
 			Hooks.resetOnNextError();
 		}
 	}
+//
+//	interface Blueprint<S, T, V> {
+//
+//		static <S, Blueprint<String, Integer, Integer> create() {
+//			return null;
+//		}
+//
+//		Flux<V> apply(Flux<S> source);
+//
+//		<R> Blueprint<S, V, R> add(Function<Flux<V>, Flux<R>> operator);
+//
+//		Blueprint<S, T, V> trampolineEvery(int maxOperatorDepth);
+//	}
+//
+//	static class FirstBlueprint<S> implements Blueprint<S, S, S> {
+//
+//		int trampolineEvery = -1;
+//
+//		FirstBlueprint() {
+//		}
+//
+//		@Override
+//		public Flux<S> apply(Flux<S> source) {
+//			return source;
+//		}
+//
+//		<V> Flux<V> doApply(List<Function<? extends Flux<?>, ? extends Flux<?>>> steps, Flux<S> source) {
+//			long depth = 0L;
+//			Flux<?> result = source;
+//			for (Function<? extends Flux<?>, ? extends Flux<?>> step : steps) {
+//				result = step.apply(result);
+//				if (trampolineEvery > 0 && depth++ % trampolineEvery == 0) {
+//					result = result.subscribeOn(Schedulers.parallel());
+//				}
+//			}
+//			return (Flux<V>) result;
+//		}
+//
+//		@Override
+//		public Blueprint<S, S, S> trampolineEvery(int maxOperatorDepth) {
+//			this.trampolineEvery = maxOperatorDepth;
+//			return this;
+//		}
+//
+//		@Override
+//		public <T> Blueprint<S, S, T> add(Function<Flux<S>, Flux<T>> operator) {
+//			return new IntermediateBlueprint<>(this, operator);
+//		}
+//	}
+//
+//	static class IntermediateBlueprint<S, T, V> implements Blueprint<S, T, V> {
+//
+//		final FirstBlueprint<S> first;
+//		@Nullable
+//		final IntermediateBlueprint<S, ?, T> previous;
+//		final Function<? extends Flux<?>, ? extends Flux<?>> operator;
+//
+//		IntermediateBlueprint(FirstBlueprint<S> first, Function<Flux<T>, Flux<V>> firstOperator) {
+//			this.previous = null;
+//			this.first = first;
+//			this.operator = firstOperator;
+//		}
+//
+//		IntermediateBlueprint(FirstBlueprint<S> first,
+//				IntermediateBlueprint<S, ?, T> previous,
+//				Function<Flux<T>, Flux<V>> operator) {
+//			this.first = first;
+//			this.previous = previous;
+//			this.operator = operator;
+//		}
+//
+//		@Override
+//		public Flux<V> apply(Flux<S> source) {
+//			List<Function<? extends Flux<?>, ? extends Flux<?>>> steps = new ArrayList<>();
+//			IntermediateBlueprint<S, ?, ?> nb = this;
+//			while (nb != null) {
+//				steps.add(nb.operator);
+//				nb = nb.previous;
+//			}
+//			Collections.reverse(steps);
+//			return first.doApply(steps, source);
+//		}
+//
+//		@Override
+//		public <R> Blueprint<S, V, R> add(Function<Flux<V>, Flux<R>> operator) {
+//			return new IntermediateBlueprint<>(first,this, operator);
+//		}
+//
+//		@Override
+//		public Blueprint<S, T, V> trampolineEvery(int maxOperatorDepth) {
+//			first.trampolineEvery(maxOperatorDepth);
+//			return this;
+//		}
+//	}
+//
+//	@Test
+//	public void recursion() {
+//		Blueprint<String, Integer, Integer> blueprint = Blueprint.create();
+//
+//		for (int i = 0; i <= 5000; i++) {
+//			int currentI = i;
+//			blueprint = blueprint.add(f -> f.map(previous -> currentI));
+//		}
+//		blueprint.trampolineEvery(1000);
+//
+//		Flux<Integer> blueprinted = blueprint.apply(Flux.just(0));
+//
+//		assertThat(blueprinted.blockLast()).isEqualTo(5000);
+//
+
 }
