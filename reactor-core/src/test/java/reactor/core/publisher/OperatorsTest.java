@@ -890,4 +890,6 @@ public class OperatorsTest {
 		assertThat(threadNames).containsOnly(Thread.currentThread().getName());
 	}
 
+	//TODO test with errors, debug mode, etc...
+
 }

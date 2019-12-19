@@ -112,6 +112,7 @@ public abstract class Operators {
 			if (depth % trampolineMaxOperatorDepth == 0 && depth != 0) {
 				int trampolined = incrementAndGet();
 				if (trampolined == 1) {
+					//TODO should we try to capture an assembly backtrace here and reattach in case of errors?
 					//lazy creation of the actual trampoline
 					this.trampolineScheduler = Schedulers.newElastic(
 							"operatorStackTrampolining-" + COUNTER.incrementAndGet(),
