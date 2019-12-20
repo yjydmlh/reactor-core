@@ -42,7 +42,7 @@ abstract class InternalConnectableFluxOperator<I, O> extends ConnectableFlux<O> 
 	@Override
 	@SuppressWarnings("unchecked")
 	public final void subscribe(CoreSubscriber<? super O> subscriber) {
-		Operators.Trampoline trampoline = new Operators.Trampoline();
+		Operators.Stacksafe stacksafe = new Operators.Stacksafe();
 		OptimizableOperator operator = this;
 		while (true) {
 			subscriber = operator.subscribeOrReturn(subscriber);
@@ -51,7 +51,7 @@ abstract class InternalConnectableFluxOperator<I, O> extends ConnectableFlux<O> 
 				return;
 			}
 
-			subscriber = trampoline.tryTrampoline(subscriber);
+			subscriber = stacksafe.protect(subscriber);
 
 			OptimizableOperator newSource = operator.nextOptimizableSource();
 			if (newSource == null) {

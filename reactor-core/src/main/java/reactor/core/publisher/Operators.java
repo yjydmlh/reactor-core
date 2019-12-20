@@ -34,7 +34,6 @@ import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
 import reactor.core.CorePublisher;
 import reactor.core.CoreSubscriber;
-import reactor.core.Disposable;
 import reactor.core.Exceptions;
 import reactor.core.Fuseable;
 import reactor.core.Fuseable.QueueSubscription;
@@ -60,46 +59,47 @@ public abstract class Operators {
 
 	//TODO put default to an actually useful value (to be determined empirically?)
 	/**
-	 * The maximum number of subsequent Reactor core operators (operator depth) that should be chained before trampolining occurs.
+	 * The maximum number of subsequent Reactor core operators (operator depth) that should be chained before an artificial
+	 * async boundary is introduced.
 	 * <p>
-	 * Trampolining is done in a best effort fashion and only guaranteed for vanilla core operators that are subject to the tail-call subscribe
+	 * Stack safety is done in a best effort fashion and only guaranteed for vanilla core operators that are subject to the tail-call subscribe
 	 * optimization.
 	 */
-	static volatile int trampolineMaxOperatorDepth = Integer.parseInt(System.getProperty("reactor.max.operator.depth", "10000"));
+	static volatile int stacksafeMaxOperatorDepth = Integer.parseInt(System.getProperty("reactor.max.operator.depth", "10000"));
 
 	/**
-	 * Replace the {@link #trampolineMaxOperatorDepth} and return the old value. Primarily intended for testing purposes.
-	 * @param newMaxDepth the new max operator depth before trampolining should be applied to reset stacktraces
-	 * @return the old {@link #trampolineMaxOperatorDepth}
+	 * Replace the {@link #stacksafeMaxOperatorDepth} and return the old value. Primarily intended for testing purposes.
+	 * @param newMaxDepth the new max operator depth before an async boundary  should be introduced to reset stacktraces
+	 * @return the old {@link #stacksafeMaxOperatorDepth}
 	 */
-	static int setTrampolineMaxOperatorDepth(int newMaxDepth) {
-		int old = trampolineMaxOperatorDepth;
-		trampolineMaxOperatorDepth = newMaxDepth;
+	static int setStacksafeMaxOperatorDepth(int newMaxDepth) {
+		int old = stacksafeMaxOperatorDepth;
+		stacksafeMaxOperatorDepth = newMaxDepth;
 		return old;
 	}
 
 	/**
 	 * A utility class to break stacks that are too deep and likely to cause {@link StackOverflowError}
-	 * either at subscription time or runtime, by injecting a trampolining {@link Subscriber} which
+	 * either at subscription time or runtime, by injecting an async boundary {@link Subscriber} which
 	 * will submit onSubscribe/request/cancel/onNext/onComplete/onError signals on a dedicated
 	 * {@link Schedulers#newElastic(String) elastic Scheduler}.
 	 * <p>
 	 * The desired maximum stack depth (or rather the maximum desired operator chain depth) is
 	 * defined via the {@code reactor.max.operator.depth} system property.
 	 */
-	static class Trampoline extends AtomicInteger {
+	static class Stacksafe extends AtomicInteger {
 
 		static final AtomicInteger COUNTER = new AtomicInteger();
 
-		Scheduler trampolineScheduler;
-		long depth;
+		Scheduler stacksafeScheduler;
+		long      depth;
 
-		Trampoline() {
-			this.trampolineScheduler = Schedulers.immediate(); //temporary, avoid creating anything until 1st trampolining
+		Stacksafe() {
+			this.stacksafeScheduler = Schedulers.immediate(); //temporary, avoid creating anything until 1st trampolining
 			this.depth = 0L;
 		}
 
-		<U> CoreSubscriber<U> tryTrampoline(CoreSubscriber<U> actual) {
+		<U> CoreSubscriber<U> protect(CoreSubscriber<U> actual) {
 			CoreSubscriber<U> result = actual;
 			//TODO test the behavior with thread-hopping and blocking flatmaps
 			//TODO check that this is actually useful. if so, consider introducing marker interface instead
@@ -109,48 +109,48 @@ public abstract class Operators {
 					|| actual instanceof MonoSubscribeOn.SubscribeOnSubscriber) {
 				return actual; //don't trampoline right before an explicit thread-hopping
 			}
-			if (depth % trampolineMaxOperatorDepth == 0 && depth != 0) {
-				int trampolined = incrementAndGet();
-				if (trampolined == 1) {
+			if (depth % stacksafeMaxOperatorDepth == 0 && depth != 0) {
+				int protectedCount = incrementAndGet();
+				if (protectedCount == 1) {
 					//TODO should we try to capture an assembly backtrace here and reattach in case of errors?
-					//lazy creation of the actual trampoline
-					this.trampolineScheduler = Schedulers.newElastic(
-							"operatorStackTrampolining-" + COUNTER.incrementAndGet(),
+					//lazy creation of the actual scheduler
+					this.stacksafeScheduler = Schedulers.newElastic(
+							"operatorStacksafe-" + COUNTER.incrementAndGet(),
 							1, true);
 				}
 
 				if (actual instanceof QueueSubscription) {
 					//original was a QueueSubscription, emulate one (that always negotiate NONE)
 					result = new FluxHide.SuppressFuseableSubscriber<>(actual);
-					result = new TrampolineSubscriber<>(result, trampolined, this);
+					result = new StacksafeSubscriber<>(result, protectedCount, this);
 				}
 				else {
-					result = new TrampolineSubscriber<>(actual, trampolined, this);
+					result = new StacksafeSubscriber<>(actual, protectedCount, this);
 				}
 			}
 			depth++;
 			return result;
 		}
 
-		void markDone(int trampolineIndex) {
+		void markDone(int stacksafeIndex) {
 			if (this.decrementAndGet() == 0) {
-				trampolineScheduler.dispose();
+				stacksafeScheduler.dispose();
 			}
 		}
 
-		static class TrampolineSubscriber<T> implements InnerOperator<T, T> {
+		static class StacksafeSubscriber<T> implements InnerOperator<T, T> {
 
-			final Trampoline parent;
-			final int index;
-			final Scheduler.Worker worker;
+			final Stacksafe                 parent;
+			final int                       index;
+			final Scheduler.Worker          worker;
 			final CoreSubscriber<? super T> downstream;
 
 			Subscription subscription;
 
-			TrampolineSubscriber(CoreSubscriber<? super T> downstream, int thisTrampolineIndex, Trampoline trampoline) {
-				this.parent = trampoline;
-				this.worker = trampoline.trampolineScheduler.createWorker();
-				this.index = thisTrampolineIndex;
+			StacksafeSubscriber(CoreSubscriber<? super T> downstream, int thisStacksafeIndex, Stacksafe stacksafe) {
+				this.parent = stacksafe;
+				this.worker = stacksafe.stacksafeScheduler.createWorker();
+				this.index = thisStacksafeIndex;
 				this.downstream = downstream;
 			}
 
