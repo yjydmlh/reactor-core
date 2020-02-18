@@ -18,6 +18,8 @@ package reactor.util.retry;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -25,6 +27,7 @@ import java.util.function.Supplier;
 import org.reactivestreams.Publisher;
 
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.annotation.Nullable;
@@ -38,6 +41,9 @@ import reactor.util.annotation.Nullable;
 public class Retry {
 
 	static final Duration MAX_BACKOFF = Duration.ofMillis(Long.MAX_VALUE);
+
+	static final Consumer<RetrySignal>                           NO_OP_CONSUMER   = rs -> {};
+	static final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> NO_OP_BIFUNCTION = (rs, m) -> m;
 
 	/**
 	 * State for a {@link Flux#retry(Supplier) Flux retry} or {@link reactor.core.publisher.Mono#retry(Supplier) Mono retry}.
@@ -95,7 +101,8 @@ public class Retry {
 	 * @see Builder#minBackoff(Duration)
 	 */
 	public static Builder backoff(long maxAttempts, Duration minBackoff) {
-		return new Builder(true, maxAttempts, t -> true, false, minBackoff, MAX_BACKOFF, 0.5d, Schedulers.parallel());
+		return new Builder(true, maxAttempts, t -> true, false, minBackoff, MAX_BACKOFF, 0.5d, Schedulers.parallel(),
+				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
 	}
 
 	/**
@@ -106,7 +113,8 @@ public class Retry {
 	 * @see Builder#maxAttempts(long)
 	 */
 	public static Builder max(long max) {
-		return new Builder(false, max, t -> true, false, Duration.ZERO, MAX_BACKOFF, 0d, null);
+		return new Builder(false, max, t -> true, false, Duration.ZERO, MAX_BACKOFF, 0d,null,
+				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
 	}
 
 	/**
@@ -148,26 +156,34 @@ public class Retry {
 	 */
 	public static class Builder implements Supplier<Function<Flux<RetrySignal>, Publisher<?>>> {
 
-		final Duration minBackoff;
-		final Duration maxBackoff;
-		final double jitterFactor;
+		final Duration  minBackoff;
+		final Duration  maxBackoff;
+		final double    jitterFactor;
 		@Nullable
 		final Scheduler backoffScheduler;
 
-		final long                         maxAttempts;
-		final Predicate<Throwable>         throwablePredicate;
-		final boolean                      isTransientErrors;
-		final boolean                      isConfiguredForBackoff;
+		final long                 maxAttempts;
+		final Predicate<Throwable> throwablePredicate;
+		final boolean              isTransientErrors;
+		final boolean              isConfiguredForBackoff;
+
+		final Consumer<RetrySignal> doPreRetry;
+		final Consumer<RetrySignal> doPostRetry;
+		final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry;
+		final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry;
 
 		/**
 		 * Copy constructor.
 		 */
-		Builder(boolean isConfiguredForBackoff,
-				long max,
+		Builder(boolean isConfiguredForBackoff, long max,
 				Predicate<? super Throwable> aThrowablePredicate,
 				boolean isTransientErrors,
 				Duration minBackoff, Duration maxBackoff, double jitterFactor,
-				@Nullable Scheduler backoffScheduler) {
+				@Nullable Scheduler backoffScheduler,
+				Consumer<RetrySignal> doPreRetry,
+				Consumer<RetrySignal> doPostRetry,
+				BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry,
+				BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry) {
 			this.isConfiguredForBackoff = isConfiguredForBackoff;
 			this.maxAttempts = max;
 			this.throwablePredicate = aThrowablePredicate::test; //massaging type
@@ -176,6 +192,10 @@ public class Retry {
 			this.maxBackoff = maxBackoff;
 			this.jitterFactor = jitterFactor;
 			this.backoffScheduler = backoffScheduler;
+			this.doPreRetry = doPreRetry;
+			this.doPostRetry = doPostRetry;
+			this.asyncPreRetry = asyncPreRetry;
+			this.asyncPostRetry = asyncPostRetry;
 		}
 
 		/**
@@ -206,7 +226,11 @@ public class Retry {
 					this.minBackoff,
 					this.maxBackoff,
 					this.jitterFactor,
-					this.backoffScheduler);
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry,
+					this.asyncPreRetry,
+					this.asyncPostRetry);
 		}
 
 		/**
@@ -226,7 +250,11 @@ public class Retry {
 					this.minBackoff,
 					this.maxBackoff,
 					this.jitterFactor,
-					this.backoffScheduler);
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry,
+					this.asyncPreRetry,
+					this.asyncPostRetry);
 		}
 
 		/**
@@ -261,7 +289,75 @@ public class Retry {
 					this.minBackoff,
 					this.maxBackoff,
 					this.jitterFactor,
-					this.backoffScheduler);
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry,
+					this.asyncPreRetry,
+					this.asyncPostRetry);
+		}
+
+		public Builder andDoBeforeRetry(Consumer<RetrySignal> doBeforeRetry) {
+			return new Builder(
+					this.isConfiguredForBackoff,
+					this.maxAttempts,
+					this.throwablePredicate,
+					this.isTransientErrors,
+					this.minBackoff,
+					this.maxBackoff,
+					this.jitterFactor,
+					this.backoffScheduler,
+					this.doPreRetry.andThen(doBeforeRetry),
+					this.doPostRetry,
+					this.asyncPreRetry,
+					this.asyncPostRetry);
+		}
+
+		public Builder andDoAfterRetry(Consumer<RetrySignal> doAfterRetry) {
+			return new Builder(
+					this.isConfiguredForBackoff,
+					this.maxAttempts,
+					this.throwablePredicate,
+					this.isTransientErrors,
+					this.minBackoff,
+					this.maxBackoff,
+					this.jitterFactor,
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry.andThen(doAfterRetry),
+					this.asyncPreRetry,
+					this.asyncPostRetry);
+		}
+
+		public Builder andDelayRetryWith(Function<RetrySignal, Mono<Void>> doAsyncBeforeRetry) {
+			return new Builder(
+					this.isConfiguredForBackoff,
+					this.maxAttempts,
+					this.throwablePredicate,
+					this.isTransientErrors,
+					this.minBackoff,
+					this.maxBackoff,
+					this.jitterFactor,
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry,
+					(rs, m) -> asyncPreRetry.apply(rs, m).then(doAsyncBeforeRetry.apply(rs)),
+					this.asyncPostRetry);
+		}
+
+		public Builder andRetryThen(Function<RetrySignal, Mono<Void>> doAsyncAfterRetry) {
+			return new Builder(
+					this.isConfiguredForBackoff,
+					this.maxAttempts,
+					this.throwablePredicate,
+					this.isTransientErrors,
+					this.minBackoff,
+					this.maxBackoff,
+					this.jitterFactor,
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry,
+					this.asyncPreRetry,
+					(rs, m) -> asyncPostRetry.apply(rs, m).then(doAsyncAfterRetry.apply(rs)));
 		}
 
 		/**
@@ -287,7 +383,11 @@ public class Retry {
 					this.minBackoff,
 					this.maxBackoff,
 					this.jitterFactor,
-					this.backoffScheduler);
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry,
+					this.asyncPreRetry,
+					this.asyncPostRetry);
 		}
 
 		/**
@@ -307,7 +407,11 @@ public class Retry {
 					Objects.requireNonNull(minBackoff, "minBackoff"),
 					this.maxBackoff,
 					this.jitterFactor,
-					this.backoffScheduler);
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry,
+					this.asyncPreRetry,
+					this.asyncPostRetry);
 		}
 
 		/**
@@ -327,7 +431,11 @@ public class Retry {
 					this.minBackoff,
 					Objects.requireNonNull(maxBackoff, "maxBackoff"),
 					this.jitterFactor,
-					this.backoffScheduler);
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry,
+					this.asyncPreRetry,
+					this.asyncPostRetry);
 		}
 
 		/**
@@ -348,7 +456,11 @@ public class Retry {
 					this.minBackoff,
 					this.maxBackoff,
 					jitterFactor,
-					this.backoffScheduler);
+					this.backoffScheduler,
+					this.doPreRetry,
+					this.doPostRetry,
+					this.asyncPreRetry,
+					this.asyncPostRetry);
 		}
 
 		/**
@@ -369,7 +481,11 @@ public class Retry {
 					this.minBackoff,
 					this.maxBackoff,
 					this.jitterFactor,
-					Objects.requireNonNull(backoffScheduler, "backoffScheduler"));
+					Objects.requireNonNull(backoffScheduler, "backoffScheduler"),
+					this.doPreRetry,
+					this.doPostRetry,
+					this.asyncPreRetry,
+					this.asyncPostRetry);
 		}
 
 		/**
@@ -417,6 +533,11 @@ public class Retry {
 		@Override
 		public RetrySignal retain() {
 			return this;
+		}
+
+		@Override
+		public String toString() {
+			return "attempt #" + (failureTotalIndex + 1) + " (" + (failureSubsequentIndex + 1) + " in a row), last failure={" + failure + '}';
 		}
 	}
 }

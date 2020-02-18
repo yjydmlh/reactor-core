@@ -867,4 +867,53 @@ public class FluxRetryWhenTest {
 
 		assertThat(pauses).allMatch(p -> p == 1, "pause is constantly 1s");
 	}
+
+	@Test
+	public void cumulatedRetryHooks() {
+		AtomicInteger beforeHookTracker = new AtomicInteger();
+		AtomicInteger afterHookTracker = new AtomicInteger();
+
+		Retry.Builder builder = Retry
+				.max(1)
+				.andDoBeforeRetry(s -> System.out.println("About to retry: " + s))
+				.andDoBeforeRetry(s -> System.out.println("About to retry, tracking " + beforeHookTracker.incrementAndGet()))
+				.andDoAfterRetry(s -> System.out.println("Did retry: " + s))
+				.andDoAfterRetry(s -> System.out.println("Did to retry, tracking " + afterHookTracker.incrementAndGet()))
+				.andDelayRetryWith(s -> Mono.delay(Duration.ofSeconds(1)).then())
+				.andDelayRetryWith(s -> Mono.fromRunnable(() -> beforeHookTracker.addAndGet(100)))
+				.andRetryThen(s -> Mono.delay(Duration.ofSeconds(1)).doOnNext(delayed -> System.out.println("Post retry async " + s)).then())
+				.andRetryThen(s -> Mono.fromRunnable(() -> afterHookTracker.addAndGet(100)));
+
+		Mono.error(new IllegalStateException("boom"))
+		    .retry(builder)
+		    .as(StepVerifier::create)
+		    .verifyError();
+
+		assertThat(beforeHookTracker).hasValue(101);
+		assertThat(afterHookTracker).hasValue(101);
+	}
+
+	@Test
+	public void cumulatedRetryHooksWithTransient() {
+		AtomicInteger beforeHookTracker = new AtomicInteger();
+		AtomicInteger afterHookTracker = new AtomicInteger();
+
+		Retry.Builder builder = Retry
+				.maxInARow(2)
+				.andDoBeforeRetry(s -> System.out.println("\nAbout to retry: " + s))
+				.andDoBeforeRetry(s -> System.out.println("About to retry, tracking " + beforeHookTracker.incrementAndGet()))
+				.andDoAfterRetry(s -> System.out.println("Did retry: " + s))
+				.andDoAfterRetry(s -> System.out.println("Did retry, tracking " + afterHookTracker.incrementAndGet()))
+				.andDelayRetryWith(s -> Mono.delay(Duration.ofMillis(100)).doOnNext(delayed -> System.out.println("Pre retry delay: " + s)).then())
+				.andDelayRetryWith(s -> Mono.fromRunnable(() -> System.out.println("Pre retry delay, tracking " + beforeHookTracker.addAndGet(100))))
+				.andRetryThen(s -> Mono.delay(Duration.ofMillis(100)).doOnNext(delayed -> System.out.println("Did retry async: " + s)).then())
+				.andRetryThen(s -> Mono.fromRunnable(() -> System.out.println("Did retry async, tracking " + afterHookTracker.addAndGet(100))));
+
+		transientErrorSource()
+				.retry(builder)
+				.blockLast();
+
+		assertThat(beforeHookTracker).as("before hooks cumulated").hasValue(606);
+		assertThat(afterHookTracker).as("after hooks cumulated").hasValue(606);
+	}
 }

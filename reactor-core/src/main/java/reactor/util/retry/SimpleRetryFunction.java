@@ -16,44 +16,80 @@
 
 package reactor.util.retry;
 
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
 import org.reactivestreams.Publisher;
 
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 class SimpleRetryFunction implements Function<Flux<Retry.RetrySignal>, Publisher<?>> {
 
-	final long                         maxAttempts;
-	final Predicate<? super Throwable> throwablePredicate;
-	final boolean                      isTransientErrors;
+	final long                                                  maxAttempts;
+	final Predicate<Throwable>                                  throwablePredicate;
+	final boolean                                               isTransientErrors;
+	final Consumer<Retry.RetrySignal>                           doPreRetry;
+	final Consumer<Retry.RetrySignal>                           doPostRetry;
+	final BiFunction<Retry.RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry;
+	final BiFunction<Retry.RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry;
 
 	SimpleRetryFunction(Retry.Builder builder) {
 		this.maxAttempts = builder.maxAttempts;
 		this.throwablePredicate = builder.throwablePredicate;
 		this.isTransientErrors = builder.isTransientErrors;
+		this.doPreRetry = builder.doPreRetry;
+		this.doPostRetry = builder.doPostRetry;
+		this.asyncPreRetry = builder.asyncPreRetry;
+		this.asyncPostRetry= builder.asyncPostRetry;
 	}
 
 	@Override
 	public Publisher<?> apply(Flux<Retry.RetrySignal> flux) {
-		return flux.handle((retryWhenState, sink) -> {
+		return flux.flatMap(retryWhenState -> {
 			//capture the state immediately
-			Throwable currentFailure = retryWhenState.failure();
-			long iteration = isTransientErrors ? retryWhenState.failureSubsequentIndex() : retryWhenState.failureTotalIndex();
+			Retry.RetrySignal copy = retryWhenState.retain();
+			Throwable currentFailure = copy.failure();
+			long iteration = isTransientErrors ? copy.failureSubsequentIndex() : copy.failureTotalIndex();
 
 			if (currentFailure == null) {
-				sink.error(new IllegalStateException("RetryWhenState#failure() not expected to be null"));
+				return Mono.error(new IllegalStateException("RetryWhenState#failure() not expected to be null"));
 			}
 			else if (!throwablePredicate.test(currentFailure)) {
-				sink.error(currentFailure);
+				return Mono.error(currentFailure);
 			}
 			else if (iteration >= maxAttempts) {
-				sink.error(new IllegalStateException("Retries exhausted: " + iteration + "/" + maxAttempts, currentFailure));
+				return Mono.error(new IllegalStateException("Retries exhausted: " + iteration + "/" + maxAttempts, currentFailure));
 			}
 			else {
-				sink.next(iteration);
+				return applyHooks(copy, Mono.just(iteration));
 			}
 		});
+	}
+
+	protected <T> Mono<T> applyHooks(Retry.RetrySignal copyOfSignal, Mono<T> originalCompanion) {
+		if (doPreRetry != Retry.NO_OP_CONSUMER) {
+			try {
+				doPreRetry.accept(copyOfSignal);
+			}
+			catch (Throwable e) {
+				return Mono.error(e);
+			}
+		}
+
+		Mono<Void> postRetrySyncMono;
+		if (doPostRetry != Retry.NO_OP_CONSUMER) {
+			postRetrySyncMono = Mono.fromRunnable(() -> doPostRetry.accept(copyOfSignal));
+		}
+		else {
+			postRetrySyncMono = Mono.empty();
+		}
+
+		Mono<Void> preRetryMono = asyncPreRetry == Retry.NO_OP_BIFUNCTION ? Mono.empty() : asyncPreRetry.apply(copyOfSignal, Mono.empty());
+		Mono<Void> postRetryMono = asyncPostRetry != Retry.NO_OP_BIFUNCTION ? asyncPostRetry.apply(copyOfSignal, postRetrySyncMono) : postRetrySyncMono;
+
+		return preRetryMono.then(originalCompanion).flatMap(postRetryMono::thenReturn);
 	}
 }

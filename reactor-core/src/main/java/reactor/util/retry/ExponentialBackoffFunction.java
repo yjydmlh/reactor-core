@@ -47,8 +47,9 @@ class ExponentialBackoffFunction extends SimpleRetryFunction {
 	public Publisher<?> apply(Flux<RetrySignal> t) {
 		return t.flatMap(retryWhenState -> {
 			//capture the state immediately
-			Throwable currentFailure = retryWhenState.failure();
-			long iteration = isTransientErrors ? retryWhenState.failureSubsequentIndex() : retryWhenState.failureTotalIndex();
+			RetrySignal copy = retryWhenState.retain();
+			Throwable currentFailure = copy.failure();
+			long iteration = isTransientErrors ? copy.failureSubsequentIndex() : copy.failureTotalIndex();
 
 			if (currentFailure == null) {
 				return Mono.error(new IllegalStateException("Retry.RetrySignal#failure() not expected to be null"));
@@ -75,7 +76,7 @@ class ExponentialBackoffFunction extends SimpleRetryFunction {
 
 			//short-circuit delay == 0 case
 			if (nextBackoff.isZero()) {
-				return Mono.just(iteration);
+				return applyHooks(copy, Mono.just(iteration));
 			}
 
 			ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -103,7 +104,7 @@ class ExponentialBackoffFunction extends SimpleRetryFunction {
 				jitter = random.nextLong(lowBound, highBound);
 			}
 			Duration effectiveBackoff = nextBackoff.plusMillis(jitter);
-			return Mono.delay(effectiveBackoff, backoffScheduler);
+			return applyHooks(copy, Mono.delay(effectiveBackoff, backoffScheduler));
 		});
 	}
 }

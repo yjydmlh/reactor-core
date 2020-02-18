@@ -24,6 +24,7 @@ import org.assertj.core.api.Condition;
 import org.junit.Test;
 
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.StepVerifierOptions;
@@ -120,7 +121,11 @@ public class RetryBuilderTest {
 				.isNotSameAs(init.maxAttempts(10))
 				.isNotSameAs(init.throwablePredicate(t -> true))
 				.isNotSameAs(init.throwablePredicateModifiedWith(predicate -> predicate.and(t -> true)))
-				.isNotSameAs(init.transientErrors(true));
+				.isNotSameAs(init.transientErrors(true))
+				.isNotSameAs(init.andDoBeforeRetry(rs -> {}))
+				.isNotSameAs(init.andDoAfterRetry(rs -> {}))
+				.isNotSameAs(init.andDelayRetryWith(rs -> Mono.empty()))
+				.isNotSameAs(init.andRetryThen(rs -> Mono.empty()));
 	}
 
 	@Test
@@ -206,6 +211,71 @@ public class RetryBuilderTest {
 	public void throwablePredicateModifierRejectsNullFunction() {
 		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).throwablePredicateModifiedWith(null))
 		                                .withMessage("predicateAdjuster");
+	}
+
+	@Test
+	public void doBeforeRetryIsCumulative() {
+		AtomicInteger atomic = new AtomicInteger();
+		Retry.Builder builder = Retry
+				.max(1)
+				.andDoBeforeRetry(rs -> atomic.incrementAndGet())
+				.andDoBeforeRetry(rs -> atomic.addAndGet(100));
+
+		builder.doPreRetry.accept(null);
+
+		assertThat(atomic).hasValue(101);
+	}
+
+	@Test
+	public void doAfterRetryIsCumulative() {
+		AtomicInteger atomic = new AtomicInteger();
+		Retry.Builder builder = Retry
+				.max(1)
+				.andDoAfterRetry(rs -> atomic.incrementAndGet())
+				.andDoAfterRetry(rs -> atomic.addAndGet(100));
+
+		builder.doPostRetry.accept(null);
+
+		assertThat(atomic).hasValue(101);
+	}
+
+	@Test
+	public void delayRetryWithIsCumulative() {
+		AtomicInteger atomic = new AtomicInteger();
+		Retry.Builder builder = Retry
+				.max(1)
+				.andDelayRetryWith(rs -> Mono.fromRunnable(atomic::incrementAndGet))
+				.andDelayRetryWith(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
+
+		builder.asyncPreRetry.apply(null, Mono.empty()).block();
+
+		assertThat(atomic).hasValue(101);
+	}
+
+	@Test
+	public void retryThenIsCumulative() {
+		AtomicInteger atomic = new AtomicInteger();
+		Retry.Builder builder = Retry
+				.max(1)
+				.andRetryThen(rs -> Mono.fromRunnable(atomic::incrementAndGet))
+				.andRetryThen(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
+
+		builder.asyncPostRetry.apply(null, Mono.empty()).block();
+
+		assertThat(atomic).hasValue(101);
+	}
+
+	@Test
+	public void settingHooksDoesntInduceBackoff() {
+		final Retry.Builder builder = Retry
+				.max(1)
+				.andDoBeforeRetry(rs -> { })
+				.andDoAfterRetry(rs -> { })
+				.andDelayRetryWith(rs -> Mono.empty())
+				.andRetryThen(rs -> Mono.empty());
+
+		assertThat(builder).isNot(PRODUCING_BACKOFF_FUNCTION)
+		                   .isNot(CONFIGURED_FOR_BACKOFF);
 	}
 
 }
