@@ -110,6 +110,21 @@ public class Retry {
 	}
 
 	/**
+	 * A {@link Builder} preconfigured for a simple strategy with maximum number of retry attempts over
+	 * subsequent transient errors. An {@link org.reactivestreams.Subscriber#onNext(Object)} between
+	 * errors resets the counter (see {@link Builder#transientErrors(boolean)}).
+	 *
+	 * @param maxInARow the maximum number of retry attempts to allow in a row, reset by successful onNext
+	 * @return the builder for further configuration
+	 * @see Builder#maxAttempts(long)
+	 * @see Builder#transientErrors(boolean)
+	 */
+	public static Builder maxInARow(long maxInARow) {
+		return new Builder(false, maxInARow, t -> true, true, Duration.ZERO, MAX_BACKOFF, 0d,null,
+				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
+	}
+
+	/**
 	 * A builder for a retry strategy with fine grained options.
 	 * <p>
 	 * By default the strategy is simple: errors that match the {@link #throwablePredicate(Predicate)}
