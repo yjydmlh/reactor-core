@@ -16,6 +16,7 @@
 package reactor.core;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Arrays;
 import java.util.Collections;
@@ -503,5 +504,49 @@ public class ExceptionsTest {
 		                      .containsExactlyElementsOf(filteredExceptions)
 		                      .hasSize(2)
 		                      .hasOnlyElementsOfType(IllegalStateException.class);
+	}
+
+	@Test
+	public void isRetryExhausted() {
+		Throwable match1 = Exceptions.retryExhausted(Duration.ofSeconds(1));
+		Throwable match2 = Exceptions.retryExhausted(30, new RuntimeException("cause: boom"));
+		Throwable noMatch = new IllegalStateException("Retry exhausted: 10/10");
+
+		assertThat(Exceptions.isRetryExhausted(null)).as("null").isFalse();
+		assertThat(Exceptions.isRetryExhausted(match1)).as("match1").isTrue();
+		assertThat(Exceptions.isRetryExhausted(match2)).as("match2").isTrue();
+		assertThat(Exceptions.isRetryExhausted(noMatch)).as("noMatch").isFalse();
+	}
+
+	@Test
+	public void retryExhaustedMessageWithAttempts() {
+		Throwable retryExhausted = Exceptions.retryExhausted(30, new RuntimeException("boom"));
+
+		assertThat(retryExhausted).hasMessage("Retries exhausted: 30/30")
+		                          .hasCause(new RuntimeException("boom"));
+	}
+
+	@Test
+	public void retryExhaustedMessageWithDurationDays() {
+		Throwable retryExhausted = Exceptions.retryExhausted(Duration.ofDays(3));
+
+		assertThat(retryExhausted).hasMessage("Retries exhausted: timed out after 259200000ms (PT72H)")
+		                          .hasNoCause();
+	}
+
+	@Test
+	public void retryExhaustedMessageWithDurationMillis() {
+		Throwable retryExhausted = Exceptions.retryExhausted(Duration.ofMillis(123));
+
+		assertThat(retryExhausted).hasMessage("Retries exhausted: timed out after 123ms (PT0.123S)")
+		                          .hasNoCause();
+	}
+
+	@Test
+	public void retryExhaustedMessageWithDurationNanos() {
+		Throwable retryExhausted = Exceptions.retryExhausted(Duration.ofNanos(123));
+
+		assertThat(retryExhausted).hasMessage("Retries exhausted: timed out after 0ms (PT0.000000123S)")
+		                          .hasNoCause();
 	}
 }

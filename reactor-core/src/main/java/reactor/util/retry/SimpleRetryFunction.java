@@ -23,6 +23,7 @@ import java.util.function.Predicate;
 
 import org.reactivestreams.Publisher;
 
+import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -61,7 +62,7 @@ class SimpleRetryFunction implements Function<Flux<Retry.RetrySignal>, Publisher
 				return Mono.error(currentFailure);
 			}
 			else if (iteration >= maxAttempts) {
-				return Mono.error(new IllegalStateException("Retries exhausted: " + iteration + "/" + maxAttempts, currentFailure));
+				return Mono.error(Exceptions.retryExhausted(maxAttempts, currentFailure));
 			}
 			else {
 				return applyHooks(copy, Mono.just(iteration));

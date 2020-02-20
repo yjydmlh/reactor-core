@@ -138,6 +138,11 @@ public class Retry {
 	 * By default the strategy is simple: errors that match the {@link #throwablePredicate(Predicate)}
 	 * (by default all) are retried up to {@link #maxAttempts(long)} times.
 	 * <p>
+	 * When the maximum attempt of retries is reached, a runtime exception is propagated downstream which
+	 * can be pinpointed with {@link reactor.core.Exceptions#isRetryExhausted(Throwable)}. The cause of
+	 * the last attempt's failure is attached as said {@link reactor.core.Exceptions#retryExhausted(long, Throwable) retryExhausted}
+	 * exception's cause.
+	 * <p>
 	 * If one of the {@link #minBackoff(Duration)}, {@link #maxBackoff(Duration)}, {@link #jitter(double)}
 	 * or {@link #scheduler(Scheduler)} method is used, the strategy becomes an exponential backoff strategy,
 	 * randomized with a user-provided {@link #jitter(double)} factor between {@code 0.d} (no jitter)
