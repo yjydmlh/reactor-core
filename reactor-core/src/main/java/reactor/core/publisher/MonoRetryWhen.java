@@ -36,10 +36,9 @@ import reactor.util.retry.Retry;
  */
 final class MonoRetryWhen<T> extends InternalMonoOperator<T, T> {
 
-	final Function<? super Flux<Retry.RetrySignal>, ? extends Publisher<?>> whenSourceFactory;
+	final Retry whenSourceFactory;
 
-	MonoRetryWhen(Mono<? extends T> source,
-			Function<? super Flux<Retry.RetrySignal>, ? extends Publisher<?>> whenSourceFactory) {
+	MonoRetryWhen(Mono<? extends T> source, Retry whenSourceFactory) {
 		super(source);
 		this.whenSourceFactory = Objects.requireNonNull(whenSourceFactory, "whenSourceFactory");
 	}

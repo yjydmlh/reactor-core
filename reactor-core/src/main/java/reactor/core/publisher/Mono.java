@@ -42,19 +42,20 @@ import java.util.stream.LongStream;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
+
 import reactor.core.CorePublisher;
 import reactor.core.CoreSubscriber;
 import reactor.core.Disposable;
 import reactor.core.Exceptions;
 import reactor.core.Fuseable;
+import reactor.core.Scannable;
 import reactor.core.publisher.FluxOnAssembly.AssemblyLightSnapshot;
 import reactor.core.publisher.FluxOnAssembly.AssemblySnapshot;
-import reactor.util.Metrics;
-import reactor.core.Scannable;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Scheduler.Worker;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.Logger;
+import reactor.util.Metrics;
 import reactor.util.annotation.Nullable;
 import reactor.util.concurrent.Queues;
 import reactor.util.context.Context;
@@ -3713,13 +3714,14 @@ public abstract class Mono<T> implements CorePublisher<T> {
 	 * this could lead to the represented state being out of sync with the state at which the retry
 	 * was evaluated. Map it to {@link Retry.RetrySignal#retain()} right away to mediate this.
 	 *
-	 * @param strategySupplier a supplier of a retry {@link Function}, typically a {@link Retry.Builder} to configure retries
+	 * @param strategyBuilder a {@link Retry} strategy builder to configure retries, typically a {@link Retry.Builder}
 	 * @return a {@link Flux} that retries on onError
-	 * @see Retry.Builder
-	 * @see Retry.Builder#get()
+	 * @see Retry#max(long)
+	 * @see Retry#maxInARow(long)
+	 * @see Retry#backoff(long, Duration)
 	 */
-	public final Mono<T> retry(Supplier<Function<Flux<Retry.RetrySignal>, Publisher<?>>> strategySupplier) {
-		return onAssembly(new MonoRetryWhen<>(this, strategySupplier.get()));
+	public final Mono<T> retry(Supplier<Retry> strategyBuilder) {
+		return onAssembly(new MonoRetryWhen<>(this, strategyBuilder.get()));
 	}
 
 	/**

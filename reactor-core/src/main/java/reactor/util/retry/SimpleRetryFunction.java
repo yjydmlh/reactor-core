@@ -16,9 +16,9 @@
 
 package reactor.util.retry;
 
+import java.time.Duration;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Predicate;
 
 import org.reactivestreams.Publisher;
@@ -27,7 +27,11 @@ import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-class SimpleRetryFunction implements Function<Flux<Retry.RetrySignal>, Publisher<?>> {
+class SimpleRetryFunction implements Retry {
+
+	static final Duration                                        MAX_BACKOFF      = Duration.ofMillis(Long.MAX_VALUE);
+	static final Consumer<RetrySignal>                           NO_OP_CONSUMER   = rs -> {};
+	static final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> NO_OP_BIFUNCTION = (rs, m) -> m;
 
 	final long                                                  maxAttempts;
 	final Predicate<Throwable>                                  throwablePredicate;
@@ -48,7 +52,7 @@ class SimpleRetryFunction implements Function<Flux<Retry.RetrySignal>, Publisher
 	}
 
 	@Override
-	public Publisher<?> apply(Flux<Retry.RetrySignal> flux) {
+	public Publisher<?> generateCompanion(Flux<Retry.RetrySignal> flux) {
 		return flux.flatMap(retryWhenState -> {
 			//capture the state immediately
 			Retry.RetrySignal copy = retryWhenState.retain();
@@ -71,7 +75,7 @@ class SimpleRetryFunction implements Function<Flux<Retry.RetrySignal>, Publisher
 	}
 
 	protected <T> Mono<T> applyHooks(Retry.RetrySignal copyOfSignal, Mono<T> originalCompanion) {
-		if (doPreRetry != Retry.NO_OP_CONSUMER) {
+		if (doPreRetry != NO_OP_CONSUMER) {
 			try {
 				doPreRetry.accept(copyOfSignal);
 			}
@@ -81,15 +85,15 @@ class SimpleRetryFunction implements Function<Flux<Retry.RetrySignal>, Publisher
 		}
 
 		Mono<Void> postRetrySyncMono;
-		if (doPostRetry != Retry.NO_OP_CONSUMER) {
+		if (doPostRetry != NO_OP_CONSUMER) {
 			postRetrySyncMono = Mono.fromRunnable(() -> doPostRetry.accept(copyOfSignal));
 		}
 		else {
 			postRetrySyncMono = Mono.empty();
 		}
 
-		Mono<Void> preRetryMono = asyncPreRetry == Retry.NO_OP_BIFUNCTION ? Mono.empty() : asyncPreRetry.apply(copyOfSignal, Mono.empty());
-		Mono<Void> postRetryMono = asyncPostRetry != Retry.NO_OP_BIFUNCTION ? asyncPostRetry.apply(copyOfSignal, postRetrySyncMono) : postRetrySyncMono;
+		Mono<Void> preRetryMono = asyncPreRetry == NO_OP_BIFUNCTION ? Mono.empty() : asyncPreRetry.apply(copyOfSignal, Mono.empty());
+		Mono<Void> postRetryMono = asyncPostRetry != NO_OP_BIFUNCTION ? asyncPostRetry.apply(copyOfSignal, postRetrySyncMono) : postRetrySyncMono;
 
 		return preRetryMono.then(originalCompanion).flatMap(postRetryMono::thenReturn);
 	}

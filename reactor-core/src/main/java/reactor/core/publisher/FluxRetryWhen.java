@@ -43,15 +43,15 @@ import reactor.util.retry.Retry;
  */
 final class FluxRetryWhen<T> extends InternalFluxOperator<T, T> {
 
-	final Function<? super Flux<Retry.RetrySignal>, ? extends Publisher<?>> whenSourceFactory;
+	final Retry whenSourceFactory;
 
-	FluxRetryWhen(Flux<? extends T> source, Function<? super Flux<Retry.RetrySignal>, ? extends Publisher<?>> whenSourceFactory) {
+	FluxRetryWhen(Flux<? extends T> source, Retry whenSourceFactory) {
 		super(source);
 		this.whenSourceFactory = Objects.requireNonNull(whenSourceFactory, "whenSourceFactory");
 	}
 
 	static <T> void subscribe(CoreSubscriber<? super T> s,
-			Function<? super Flux<Retry.RetrySignal>, ? extends Publisher<?>> whenSourceFactory,
+			Retry whenSourceFactory,
 			CorePublisher<? extends T> source) {
 		RetryWhenOtherSubscriber other = new RetryWhenOtherSubscriber();
 		Subscriber<Retry.RetrySignal> signaller = Operators.serialize(other.completionSignal);
@@ -68,7 +68,7 @@ final class FluxRetryWhen<T> extends InternalFluxOperator<T, T> {
 
 		Publisher<?> p;
 		try {
-			p = Objects.requireNonNull(whenSourceFactory.apply(other), "The whenSourceFactory returned a null Publisher");
+			p = Objects.requireNonNull(whenSourceFactory.generateCompanion(other), "The whenSourceFactory returned a null Publisher");
 		}
 		catch (Throwable e) {
 			s.onError(Operators.onOperatorError(e, s.currentContext()));

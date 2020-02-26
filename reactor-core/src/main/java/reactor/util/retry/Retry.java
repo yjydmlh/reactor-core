@@ -32,27 +32,37 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.annotation.Nullable;
 
+import static reactor.util.retry.SimpleRetryFunction.*;
+
 /**
- * Utilities around {@link Flux#retry(Supplier)}  retries} (builder to configure retries,
- * retry {@link RetrySignal signal}, etc...)
+ * Functional interface to configure retries depending on a companion {@link Flux} of {@link RetrySignal},
+ * as well as builders for such {@link Flux#retry(Supplier)}  retries} companions.
  *
  * @author Simon Baslé
  */
-public class Retry {
+@FunctionalInterface
+public interface Retry {
 
-	static final Duration MAX_BACKOFF = Duration.ofMillis(Long.MAX_VALUE);
-
-	static final Consumer<RetrySignal>                           NO_OP_CONSUMER   = rs -> {};
-	static final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> NO_OP_BIFUNCTION = (rs, m) -> m;
+	/**
+	 * The intent of the functional {@link Retry} class is to let users configure how to react to {@link RetrySignal}
+	 * by providing the operator with a companion publisher. Any {@link org.reactivestreams.Subscriber#onNext(Object) onNext}
+	 * emitted by this publisher will trigger a retry, but if that emission is delayed compared to the original signal then
+	 * the attempt is delayed as well. This method generates the companion, out of a {@link Flux} of {@link RetrySignal},
+	 * which itself can serve as the simplest form of retry companion (indefinitely and immediately retry on any error).
+	 *
+	 * @param retrySignalCompanion the original {@link Flux} of {@link RetrySignal}, notifying of each source error that
+	 * _might_ result in a retry attempt, with context around the error and current retry cycle.
+	 * @return the actual companion to use, which might delay or limit retry attempts
+	 */
+	Publisher<?> generateCompanion(Flux<RetrySignal> retrySignalCompanion);
 
 	/**
 	 * State for a {@link Flux#retry(Supplier) Flux retry} or {@link reactor.core.publisher.Mono#retry(Supplier) Mono retry}.
-	 * The state is passed to the retry function inside a publisher and gives information about the
-	 * {@link #failure()} that potentially triggers a retry, as well as two indexes: the number of
-	 * errors that happened so far (and were retried) and the same number, but only taking into account
-	 * <strong>subsequent</strong> errors (see {@link #failureSubsequentIndex()}).
+	 * A flux of states is passed to the user, which gives information about the {@link #failure()} that potentially triggers
+	 * a retry as well as two indexes: the number of errors that happened so far (and were retried) and the same number,
+	 * but only taking into account <strong>subsequent</strong> errors (see {@link #failureSubsequentIndex()}).
 	 */
-	public interface RetrySignal {
+	interface RetrySignal {
 
 		/**
 		 * The ZERO BASED index number of this error (can also be read as how many retries have occurred
@@ -100,7 +110,7 @@ public class Retry {
 	 * @see Builder#maxAttempts(long)
 	 * @see Builder#minBackoff(Duration)
 	 */
-	public static Builder backoff(long maxAttempts, Duration minBackoff) {
+	static Builder backoff(long maxAttempts, Duration minBackoff) {
 		return new Builder(true, maxAttempts, t -> true, false, minBackoff, MAX_BACKOFF, 0.5d, Schedulers.parallel(),
 				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
 	}
@@ -112,7 +122,7 @@ public class Retry {
 	 * @return the builder for further configuration
 	 * @see Builder#maxAttempts(long)
 	 */
-	public static Builder max(long max) {
+	static Builder max(long max) {
 		return new Builder(false, max, t -> true, false, Duration.ZERO, MAX_BACKOFF, 0d,null,
 				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
 	}
@@ -127,7 +137,7 @@ public class Retry {
 	 * @see Builder#maxAttempts(long)
 	 * @see Builder#transientErrors(boolean)
 	 */
-	public static Builder maxInARow(long maxInARow) {
+	static Builder maxInARow(long maxInARow) {
 		return new Builder(false, maxInARow, t -> true, true, Duration.ZERO, MAX_BACKOFF, 0d,null,
 				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
 	}
@@ -159,7 +169,7 @@ public class Retry {
 	 * The {@link Builder} is copy-on-write and as such can be stored as a "template" and further configured
 	 * by different components without a risk of modifying the original configuration.
 	 */
-	public static class Builder implements Supplier<Function<Flux<RetrySignal>, Publisher<?>>> {
+	class Builder implements Supplier<Retry> {
 
 		final Duration  minBackoff;
 		final Duration  maxBackoff;
@@ -496,10 +506,9 @@ public class Retry {
 		/**
 		 * Build the configured retry strategy.
 		 *
-		 * @return the retry {@link Function} based on a companion flux of {@link RetrySignal}
+		 * @return the retry {@link Retry} based on a companion flux of {@link RetrySignal}
 		 */
-		@Override
-		public Function<Flux<RetrySignal>, Publisher<?>> get() {
+		public Retry get() {
 			if (isConfiguredForBackoff) {
 				return new ExponentialBackoffFunction(this);
 			}
@@ -507,42 +516,4 @@ public class Retry {
 		}
 	}
 
-	static class ImmutableRetrySignal implements RetrySignal {
-
-		final long failureTotalIndex;
-		final long failureSubsequentIndex;
-		final Throwable failure;
-
-		ImmutableRetrySignal(long failureTotalIndex, long failureSubsequentIndex,
-				Throwable failure) {
-			this.failureTotalIndex = failureTotalIndex;
-			this.failureSubsequentIndex = failureSubsequentIndex;
-			this.failure = failure;
-		}
-
-		@Override
-		public long failureTotalIndex() {
-			return this.failureTotalIndex;
-		}
-
-		@Override
-		public long failureSubsequentIndex() {
-			return this.failureSubsequentIndex;
-		}
-
-		@Override
-		public Throwable failure() {
-			return this.failure;
-		}
-
-		@Override
-		public RetrySignal retain() {
-			return this;
-		}
-
-		@Override
-		public String toString() {
-			return "attempt #" + (failureTotalIndex + 1) + " (" + (failureSubsequentIndex + 1) + " in a row), last failure={" + failure + '}';
-		}
-	}
 }

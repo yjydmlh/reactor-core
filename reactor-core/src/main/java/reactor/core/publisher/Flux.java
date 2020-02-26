@@ -49,6 +49,7 @@ import java.util.stream.Stream;
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
+
 import reactor.core.CorePublisher;
 import reactor.core.CoreSubscriber;
 import reactor.core.Disposable;
@@ -7251,8 +7252,9 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 */
 	public final Flux<T> retryWhen(Function<Flux<Throwable>, ? extends Publisher<?>> whenFactory) {
 		Objects.requireNonNull(whenFactory, "whenFactory");
-		return onAssembly(new FluxRetryWhen<>(this, fluxRetryWhenState -> whenFactory.apply(fluxRetryWhenState.map(
-				Retry.RetrySignal::failure))));
+		return onAssembly(new FluxRetryWhen<>(this, fluxRetryWhenState -> fluxRetryWhenState
+				.map(Retry.RetrySignal::failure)
+				.as(whenFactory)));
 	}
 
 	/**
@@ -7267,13 +7269,14 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * this could lead to the represented state being out of sync with the state at which the retry
 	 * was evaluated. Map it to {@link Retry.RetrySignal#retain()} right away to mediate this.
 	 *
-	 * @param strategySupplier a supplier of a retry {@link Function}, typically a {@link Retry.Builder} to configure retries
+	 * @param strategyBuilder a {@link Retry} strategy builder to configure retries, typically a {@link Retry.Builder}
 	 * @return a {@link Flux} that retries on onError
-	 * @see Retry.Builder
-	 * @see Retry.Builder#get()
+	 * @see Retry#max(long)
+	 * @see Retry#maxInARow(long)
+	 * @see Retry#backoff(long, Duration)
 	 */
-	public final Flux<T> retry(Supplier<Function<Flux<Retry.RetrySignal>, Publisher<?>>> strategySupplier) {
-		return onAssembly(new FluxRetryWhen<>(this, strategySupplier.get()));
+	public final Flux<T> retry(Supplier<Retry> strategyBuilder) {
+		return onAssembly(new FluxRetryWhen<>(this, strategyBuilder.get()));
 	}
 
 	/**

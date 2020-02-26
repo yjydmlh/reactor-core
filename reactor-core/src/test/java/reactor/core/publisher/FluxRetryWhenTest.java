@@ -24,14 +24,12 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.assertj.core.api.Assertions;
 import org.assertj.core.api.LongAssert;
 import org.assertj.core.data.Percentage;
 import org.junit.Test;
-import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
 
 import reactor.core.CoreSubscriber;
@@ -733,7 +731,7 @@ public class FluxRetryWhenTest {
 	public void backoffFunctionNotTransient() {
 		Flux<Integer> source = transientErrorSource();
 
-		Function<Flux<Retry.RetrySignal>, Publisher<?>> retryFunction =
+		Retry retryFunction =
 				Retry.backoff(2, Duration.ZERO)
 				     .maxBackoff(Duration.ofMillis(100))
 				     .jitter(0d)
@@ -751,7 +749,7 @@ public class FluxRetryWhenTest {
 	public void backoffFunctionTransient() {
 		Flux<Integer> source = transientErrorSource();
 
-		Function<Flux<Retry.RetrySignal>, Publisher<?>> retryFunction =
+		Retry retryFunction =
 				Retry.backoff(2, Duration.ZERO)
 				     .maxBackoff(Duration.ofMillis(100))
 				     .jitter(0d)
@@ -769,29 +767,10 @@ public class FluxRetryWhenTest {
 	public void simpleFunctionTransient() {
 		Flux<Integer> source = transientErrorSource();
 
-		Function<Flux<Retry.RetrySignal>, Publisher<?>> retryFunction =
+		Retry retryFunction =
 				Retry.max(2)
 				     .transientErrors(true)
 				     .get();
-
-		new FluxRetryWhen<>(source, retryFunction)
-				.as(StepVerifier::create)
-				.expectNext(3, 4, 7, 8, 11, 12)
-				.expectComplete()
-				.verify(Duration.ofSeconds(2));
-	}
-
-	@Test
-	public void backoffFunctionTransientAndThenDoesntRemoveTransientNature() {
-		Flux<Integer> source = transientErrorSource();
-
-		Function<Flux<Retry.RetrySignal>, Publisher<?>> retryFunction =
-				Retry.backoff(2, Duration.ZERO)
-				     .maxBackoff(Duration.ofMillis(100))
-				     .jitter(0d)
-				     .transientErrors(true)
-				     .get()
-				     .andThen(Function.identity());
 
 		new FluxRetryWhen<>(source, retryFunction)
 				.as(StepVerifier::create)

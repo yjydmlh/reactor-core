@@ -71,7 +71,7 @@ public class RetryBuilderTest {
 				.is(CONFIGURED_FOR_BACKOFF)
 				.is(PRODUCING_BACKOFF_FUNCTION);
 
-		assertThat(builder.maxBackoff(Retry.MAX_BACKOFF))
+		assertThat(builder.maxBackoff(SimpleRetryFunction.MAX_BACKOFF))
 				.as("maxBackoff(MAX)")
 				.is(CONFIGURED_FOR_BACKOFF)
 				.is(PRODUCING_BACKOFF_FUNCTION);
