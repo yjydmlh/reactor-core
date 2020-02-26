@@ -59,6 +59,7 @@ import reactor.test.scheduler.VirtualTimeScheduler;
 import reactor.util.context.Context;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
+import reactor.util.retry.Retry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -655,7 +656,7 @@ public class GuideTests {
 		Flux<String> flux =
 		Flux.<String>error(new IllegalArgumentException()) // <1>
 				.doOnError(System.out::println) // <2>
-				.retryWhen(companion -> companion.take(3)); // <3>
+				.retryWhen((Retry) companion -> companion.take(3)); // <3>
 
 		StepVerifier.create(flux)
 	                .verifyComplete();
@@ -664,11 +665,12 @@ public class GuideTests {
 	                .verifyError();
 	}
 
+	//FIXME use RetrySignal in reference documentation
 	@Test
 	public void errorHandlingRetryWhenEquatesRetry() {
 		Flux<String> flux =
 		Flux.<String>error(new IllegalArgumentException())
-				.retryWhen(companion -> companion
+				.retryWhen((Function<Flux<Throwable>, Flux<Integer>>) companion -> companion
 						.zipWith(Flux.range(1, 4), (error, index) -> { // <1>
 							if (index < 4) return index; // <2>
 							else throw Exceptions.propagate(error); // <3>
@@ -682,11 +684,12 @@ public class GuideTests {
 	                .verifyError();
 	}
 
+	//FIXME use RetrySignal in reference documentation
 	@Test
 	public void errorHandlingRetryWhenExponential() {
 		Flux<String> flux =
 		Flux.<String>error(new IllegalArgumentException())
-				.retryWhen(companion -> companion
+				.retryWhen((Function<Flux<Throwable>, Flux<Long>>)companion -> companion
 						.doOnNext(s -> System.out.println(s + " at " + LocalTime.now())) // <1>
 						.zipWith(Flux.range(1, 4), (error, index) -> { // <2>
 							if (index < 4) return index;
@@ -980,7 +983,7 @@ public class GuideTests {
 				assertThat(withSuppressed.getSuppressed()).hasSize(1);
 				assertThat(withSuppressed.getSuppressed()[0])
 						.hasMessageStartingWith("\nAssembly trace from producer [reactor.core.publisher.MonoSingle] :")
-						.hasMessageContaining("Flux.single ⇢ at reactor.guide.GuideTests.scatterAndGather(GuideTests.java:944)\n");
+						.hasMessageContaining("Flux.single ⇢ at reactor.guide.GuideTests.scatterAndGather(GuideTests.java:947)\n");
 			});
 		}
 	}

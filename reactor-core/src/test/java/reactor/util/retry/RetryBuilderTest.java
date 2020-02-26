@@ -40,13 +40,13 @@ public class RetryBuilderTest {
 					"isConfiguredForBackoff");
 
 	private static final Condition<Retry.Builder> PRODUCING_BACKOFF_FUNCTION =
-			new Condition<>(b -> b.get() instanceof ExponentialBackoffFunction,
+			new Condition<>(b -> b.build() instanceof ExponentialBackoffFunction,
 					"produces backoff Function");
 
 	@Test
 	public void callingMinBackoffSwitchesToBackoffFunction() {
 		Retry.Builder builder = Retry.max(1);
-		assertThat(builder.get()).as("smoke test initially SimpleRetryFunction").isInstanceOf(SimpleRetryFunction.class);
+		assertThat(builder.build()).as("smoke test initially SimpleRetryFunction").isInstanceOf(SimpleRetryFunction.class);
 
 		assertThat(builder.minBackoff(Duration.ofMillis(50)))
 				.as("minBackoff(50ms)")
@@ -64,7 +64,7 @@ public class RetryBuilderTest {
 	@Test
 	public void callingMaxBackoffSwitchesToBackoffFunction() {
 		Retry.Builder builder = Retry.max(1);
-		assertThat(builder.get()).as("smoke test initially SimpleRetryFunction").isInstanceOf(SimpleRetryFunction.class);
+		assertThat(builder.build()).as("smoke test initially SimpleRetryFunction").isInstanceOf(SimpleRetryFunction.class);
 
 		assertThat(builder.maxBackoff(Duration.ofMillis(50)))
 				.as("maxBackoff(50ms)")
@@ -80,7 +80,7 @@ public class RetryBuilderTest {
 	@Test
 	public void callingJitterSwitchesToBackoffFunction() {
 		Retry.Builder builder = Retry.max(1);
-		assertThat(builder.get()).as("smoke test initially SimpleRetryFunction").isInstanceOf(SimpleRetryFunction.class);
+		assertThat(builder.build()).as("smoke test initially SimpleRetryFunction").isInstanceOf(SimpleRetryFunction.class);
 
 		assertThat(builder.jitter(0.5d))
 				.as("jitter(0.5d)")
@@ -96,7 +96,7 @@ public class RetryBuilderTest {
 	@Test
 	public void callingSchedulerSwitchesToBackoffFunction() {
 		Retry.Builder builder = Retry.max(1);
-		assertThat(builder.get()).as("smoke test initially SimpleRetryFunction").isInstanceOf(SimpleRetryFunction.class);
+		assertThat(builder.build()).as("smoke test initially SimpleRetryFunction").isInstanceOf(SimpleRetryFunction.class);
 
 		assertThat(builder.scheduler(Schedulers.parallel()))
 				.as("scheduler(parallel)")
@@ -149,8 +149,8 @@ public class RetryBuilderTest {
 			});
 		};
 
-		Flux<Integer> modifiedTemplate1 = transientError.get().retry(template.maxAttempts(2));
-		Flux<Integer> modifiedTemplate2 = transientError.get().retry(template.transientErrors(true));
+		Flux<Integer> modifiedTemplate1 = transientError.get().retryWhen(template.maxAttempts(2).build());
+		Flux<Integer> modifiedTemplate2 = transientError.get().retryWhen(template.transientErrors(true).build());
 
 		StepVerifier.create(modifiedTemplate1, StepVerifierOptions.create().scenarioName("modified template 1"))
 		            .expectNext(1, 3)

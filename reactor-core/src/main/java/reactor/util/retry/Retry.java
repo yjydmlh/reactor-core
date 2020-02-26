@@ -169,7 +169,7 @@ public interface Retry {
 	 * The {@link Builder} is copy-on-write and as such can be stored as a "template" and further configured
 	 * by different components without a risk of modifying the original configuration.
 	 */
-	class Builder implements Supplier<Retry> {
+	class Builder {
 
 		final Duration  minBackoff;
 		final Duration  maxBackoff;
@@ -508,7 +508,7 @@ public interface Retry {
 		 *
 		 * @return the retry {@link Retry} based on a companion flux of {@link RetrySignal}
 		 */
-		public Retry get() {
+		public Retry build() {
 			if (isConfiguredForBackoff) {
 				return new ExponentialBackoffFunction(this);
 			}

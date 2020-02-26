@@ -29,6 +29,7 @@ import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.scheduler.VirtualTimeScheduler;
+import reactor.util.retry.Retry;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -44,8 +45,8 @@ public class MonoRetryWhenTest {
 			else {
 				s.error(new RuntimeException("test " + i));
 			}
-		}).retryWhen(repeat -> repeat.zipWith(Flux.range(1, 3), (t1, t2) -> t2)
-		                             .flatMap(time -> Mono.delay(Duration.ofSeconds(time))));
+		}).retryWhen((Retry) repeat -> repeat.zipWith(Flux.range(1, 3), (t1, t2) -> t2)
+		                                     .flatMap(time -> Mono.delay(Duration.ofSeconds(time))));
 	}
 
 	@Test
