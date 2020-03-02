@@ -116,7 +116,7 @@ public final class RetryBackoffBuilder implements Retry {
 	 * no more.
 	 *
 	 * @param maxAttempts the new retry attempt limit
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBackoffBuilder maxAttempts(long maxAttempts) {
 		return new RetryBackoffBuilder(
@@ -140,7 +140,7 @@ public final class RetryBackoffBuilder implements Retry {
 	 * sequence. Defaults to allowing retries for all exceptions.
 	 *
 	 * @param predicate the predicate to filter which exceptions can be retried
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBackoffBuilder throwablePredicate(Predicate<? super Throwable> predicate) {
 		return new RetryBackoffBuilder(
@@ -175,7 +175,7 @@ public final class RetryBackoffBuilder implements Retry {
 	 *
 	 * @param predicateAdjuster a {@link Function} that returns a new {@link Predicate} given the
 	 * currently in place {@link Predicate} (usually deriving from the old predicate).
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBackoffBuilder throwablePredicateModifiedWith(
 			Function<Predicate<Throwable>, Predicate<? super Throwable>> predicateAdjuster) {
@@ -197,6 +197,15 @@ public final class RetryBackoffBuilder implements Retry {
 				this.retryExceptionGenerator);
 	}
 
+	/**
+	 * Add synchronous behavior to be executed <strong>before</strong> the retry trigger is emitted in
+	 * the companion publisher. This should not be blocking, as the companion publisher
+	 * might be executing in a shared thread.
+	 *
+	 * @param doBeforeRetry the synchronous hook to execute before retry trigger is emitted
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
+	 * @see #andDelayRetryWith(Function) andDelayRetryWith for an asynchronous version
+	 */
 	public RetryBackoffBuilder andDoBeforeRetry(
 			Consumer<RetrySignal> doBeforeRetry) {
 		return new RetryBackoffBuilder(
@@ -214,6 +223,15 @@ public final class RetryBackoffBuilder implements Retry {
 				this.retryExceptionGenerator);
 	}
 
+	/**
+	 * Add synchronous behavior to be executed <strong>after</strong> the retry trigger is emitted in
+	 * the companion publisher. This should not be blocking, as the companion publisher
+	 * might be publishing events in a shared thread.
+	 *
+	 * @param doAfterRetry the synchronous hook to execute after retry trigger is started
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
+	 * @see #andRetryThen(Function) andRetryThen for an asynchronous version
+	 */
 	public RetryBackoffBuilder andDoAfterRetry(Consumer<RetrySignal> doAfterRetry) {
 		return new RetryBackoffBuilder(
 				this.maxAttempts,
@@ -230,6 +248,13 @@ public final class RetryBackoffBuilder implements Retry {
 				this.retryExceptionGenerator);
 	}
 
+	/**
+	 * Add asynchronous behavior to be executed <strong>before</strong> the current retry trigger in the companion publisher,
+	 * delaying the resulting retry trigger with the additional {@link Mono}.
+	 *
+	 * @param doAsyncBeforeRetry the asynchronous hook to execute before original retry trigger is emitted
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
+	 */
 	public RetryBackoffBuilder andDelayRetryWith(
 			Function<RetrySignal, Mono<Void>> doAsyncBeforeRetry) {
 		return new RetryBackoffBuilder(
@@ -247,6 +272,13 @@ public final class RetryBackoffBuilder implements Retry {
 				this.retryExceptionGenerator);
 	}
 
+	/**
+	 * Add asynchronous behavior to be executed <strong>after</strong> the current retry trigger in the companion publisher,
+	 * delaying the resulting retry trigger with the additional {@link Mono}.
+	 *
+	 * @param doAsyncAfterRetry the asynchronous hook to execute after original retry trigger is emitted
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
+	 */
 	public RetryBackoffBuilder andRetryThen(
 			Function<RetrySignal, Mono<Void>> doAsyncAfterRetry) {
 		return new RetryBackoffBuilder(
@@ -273,7 +305,7 @@ public final class RetryBackoffBuilder implements Retry {
 	 *
 	 * @param retryExhaustedGenerator the {@link Function} that generates the {@link Throwable} for the last
 	 * {@link RetrySignal}
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBackoffBuilder onRetryExhaustedThrow(BiFunction<RetryBackoffBuilder, RetrySignal, Throwable> retryExhaustedGenerator) {
 		return new RetryBackoffBuilder(
@@ -301,7 +333,7 @@ public final class RetryBackoffBuilder implements Retry {
 	 * the burst, meaning the next error after a recovery will be retried with a {@link #minBackoff(Duration)} delay.
 	 *
 	 * @param isTransientErrors {@code true} to activate transient mode
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBackoffBuilder transientErrors(boolean isTransientErrors) {
 		return new RetryBackoffBuilder(
@@ -325,7 +357,7 @@ public final class RetryBackoffBuilder implements Retry {
 	 * when the strategy was initially not a backoff one.
 	 *
 	 * @param minBackoff the minimum backoff {@link Duration}
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBackoffBuilder minBackoff(Duration minBackoff) {
 		return new RetryBackoffBuilder(
@@ -349,7 +381,7 @@ public final class RetryBackoffBuilder implements Retry {
 	 * strategy. Defaults to {@code Duration.ofMillis(Long.MAX_VALUE)}.
 	 *
 	 * @param maxBackoff the maximum backoff {@link Duration}
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBackoffBuilder maxBackoff(Duration maxBackoff) {
 		return new RetryBackoffBuilder(
@@ -374,7 +406,7 @@ public final class RetryBackoffBuilder implements Retry {
 	 * Defaults to {@code 0.5} (a jitter of at most 50% of the computed delay).
 	 *
 	 * @param jitterFactor the new jitter factor as a {@code double} between {@code 0d} and {@code 1d}
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBackoffBuilder jitter(double jitterFactor) {
 		return new RetryBackoffBuilder(
@@ -399,7 +431,7 @@ public final class RetryBackoffBuilder implements Retry {
 	 * strategy.
 	 *
 	 * @param backoffScheduler the {@link Scheduler} to use
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBackoffBuilder scheduler(Scheduler backoffScheduler) {
 		return new RetryBackoffBuilder(

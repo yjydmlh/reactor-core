@@ -152,7 +152,7 @@ public final class RetryBuilder implements Retry {
 	 *
 	 * @param predicateAdjuster a {@link Function} that returns a new {@link Predicate} given the
 	 * currently in place {@link Predicate} (usually deriving from the old predicate).
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBuilder throwablePredicateModifiedWith(
 			Function<Predicate<Throwable>, Predicate<? super Throwable>> predicateAdjuster) {
@@ -170,6 +170,15 @@ public final class RetryBuilder implements Retry {
 				this.retryExhaustedGenerator);
 	}
 
+	/**
+	 * Add synchronous behavior to be executed <strong>before</strong> the retry trigger is emitted in
+	 * the companion publisher. This should not be blocking, as the companion publisher
+	 * might be executing in a shared thread.
+	 *
+	 * @param doBeforeRetry the synchronous hook to execute before retry trigger is emitted
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
+	 * @see #andDelayRetryWith(Function) andDelayRetryWith for an asynchronous version
+	 */
 	public RetryBuilder andDoBeforeRetry(
 			Consumer<RetrySignal> doBeforeRetry) {
 		return new RetryBuilder(
@@ -183,6 +192,15 @@ public final class RetryBuilder implements Retry {
 				this.retryExhaustedGenerator);
 	}
 
+	/**
+	 * Add synchronous behavior to be executed <strong>after</strong> the retry trigger is emitted in
+	 * the companion publisher. This should not be blocking, as the companion publisher
+	 * might be publishing events in a shared thread.
+	 *
+	 * @param doAfterRetry the synchronous hook to execute after retry trigger is started
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
+	 * @see #andRetryThen(Function) andRetryThen for an asynchronous version
+	 */
 	public RetryBuilder andDoAfterRetry(Consumer<RetrySignal> doAfterRetry) {
 		return new RetryBuilder(
 				this.maxAttempts,
@@ -195,6 +213,13 @@ public final class RetryBuilder implements Retry {
 				this.retryExhaustedGenerator);
 	}
 
+	/**
+	 * Add asynchronous behavior to be executed <strong>before</strong> the current retry trigger in the companion publisher,
+	 * delaying the resulting retry trigger with the additional {@link Mono}.
+	 *
+	 * @param doAsyncBeforeRetry the asynchronous hook to execute before original retry trigger is emitted
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
+	 */
 	public RetryBuilder andDelayRetryWith(
 			Function<RetrySignal, Mono<Void>> doAsyncBeforeRetry) {
 		return new RetryBuilder(
@@ -208,6 +233,13 @@ public final class RetryBuilder implements Retry {
 				this.retryExhaustedGenerator);
 	}
 
+	/**
+	 * Add asynchronous behavior to be executed <strong>after</strong> the current retry trigger in the companion publisher,
+	 * delaying the resulting retry trigger with the additional {@link Mono}.
+	 *
+	 * @param doAsyncAfterRetry the asynchronous hook to execute after original retry trigger is emitted
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
+	 */
 	public RetryBuilder andRetryThen(
 			Function<RetrySignal, Mono<Void>> doAsyncAfterRetry) {
 		return new RetryBuilder(
@@ -229,7 +261,7 @@ public final class RetryBuilder implements Retry {
 	 *
 	 * @param retryExhaustedGenerator the {@link Function} that generates the {@link Throwable} for the last
 	 * {@link RetrySignal}
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBuilder onRetryExhaustedThrow(BiFunction<RetryBuilder, RetrySignal, Throwable> retryExhaustedGenerator) {
 		return new RetryBuilder(
@@ -253,7 +285,7 @@ public final class RetryBuilder implements Retry {
 	 * is applied to each burst individually.
 	 *
 	 * @param isTransientErrors {@code true} to activate transient mode
-	 * @return the builder for further configuration
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
 	public RetryBuilder transientErrors(boolean isTransientErrors) {
 		return new RetryBuilder(
