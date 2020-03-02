@@ -17,26 +17,17 @@
 package reactor.util.retry;
 
 import java.time.Duration;
-import java.util.Objects;
-import java.util.function.BiFunction;
-import java.util.function.Consumer;
-import java.util.function.Function;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import org.reactivestreams.Publisher;
 
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
-import reactor.util.annotation.Nullable;
 
-import static reactor.util.retry.SimpleRetryFunction.*;
+import static reactor.util.retry.RetryBuilder.*;
 
 /**
  * Functional interface to configure retries depending on a companion {@link Flux} of {@link RetrySignal},
- * as well as builders for such {@link Flux#retry(Supplier)}  retries} companions.
+ * as well as builders for such {@link Flux#retryWhen(Retry)} retries} companions.
  *
  * @author Simon Baslé
  */
@@ -57,7 +48,7 @@ public interface Retry {
 	Publisher<?> generateCompanion(Flux<RetrySignal> retrySignalCompanion);
 
 	/**
-	 * State for a {@link Flux#retry(Supplier) Flux retry} or {@link reactor.core.publisher.Mono#retry(Supplier) Mono retry}.
+	 * State for a {@link Flux#retryWhen(Retry) Flux retry} or {@link reactor.core.publisher.Mono#retryWhen(Retry) Mono retry}.
 	 * A flux of states is passed to the user, which gives information about the {@link #failure()} that potentially triggers
 	 * a retry as well as two indexes: the number of errors that happened so far (and were retried) and the same number,
 	 * but only taking into account <strong>subsequent</strong> errors (see {@link #failureSubsequentIndex()}).
@@ -101,419 +92,43 @@ public interface Retry {
 	}
 
 	/**
-	 * A {@link Builder} preconfigured for exponential backoff strategy with jitter, given a maximum number of retry attempts
+	 * A {@link RetryBackoffBuilder} preconfigured for exponential backoff strategy with jitter, given a maximum number of retry attempts
 	 * and a minimum {@link Duration} for the backoff.
 	 *
 	 * @param maxAttempts the maximum number of retry attempts to allow
 	 * @param minBackoff the minimum {@link Duration} for the first backoff
 	 * @return the builder for further configuration
-	 * @see Builder#maxAttempts(long)
-	 * @see Builder#minBackoff(Duration)
+	 * @see RetryBackoffBuilder#maxAttempts(long)
+	 * @see RetryBackoffBuilder#minBackoff(Duration)
 	 */
-	static Builder backoff(long maxAttempts, Duration minBackoff) {
-		return new Builder(true, maxAttempts, t -> true, false, minBackoff, MAX_BACKOFF, 0.5d, Schedulers.parallel(),
+	static RetryBackoffBuilder backoff(long maxAttempts, Duration minBackoff) {
+		return new RetryBackoffBuilder(maxAttempts, t -> true, false, minBackoff, MAX_BACKOFF, 0.5d, Schedulers.parallel(),
 				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
 	}
 
 	/**
-	 * A {@link Builder} preconfigured for a simple strategy with maximum number of retry attempts.
+	 * A {@link RetryBuilder} preconfigured for a simple strategy with maximum number of retry attempts.
 	 *
 	 * @param max the maximum number of retry attempts to allow
 	 * @return the builder for further configuration
-	 * @see Builder#maxAttempts(long)
+	 * @see RetryBuilder#maxAttempts(long)
 	 */
-	static Builder max(long max) {
-		return new Builder(false, max, t -> true, false, Duration.ZERO, MAX_BACKOFF, 0d,null,
-				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
+	static RetryBuilder max(long max) {
+		return new RetryBuilder(max, t -> true, false, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
 	}
 
 	/**
-	 * A {@link Builder} preconfigured for a simple strategy with maximum number of retry attempts over
+	 * A {@link RetryBuilder} preconfigured for a simple strategy with maximum number of retry attempts over
 	 * subsequent transient errors. An {@link org.reactivestreams.Subscriber#onNext(Object)} between
-	 * errors resets the counter (see {@link Builder#transientErrors(boolean)}).
+	 * errors resets the counter (see {@link RetryBuilder#transientErrors(boolean)}).
 	 *
 	 * @param maxInARow the maximum number of retry attempts to allow in a row, reset by successful onNext
 	 * @return the builder for further configuration
-	 * @see Builder#maxAttempts(long)
-	 * @see Builder#transientErrors(boolean)
+	 * @see RetryBuilder#maxAttempts(long)
+	 * @see RetryBuilder#transientErrors(boolean)
 	 */
-	static Builder maxInARow(long maxInARow) {
-		return new Builder(false, maxInARow, t -> true, true, Duration.ZERO, MAX_BACKOFF, 0d,null,
-				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
-	}
-
-	/**
-	 * A builder for a retry strategy with fine grained options.
-	 * <p>
-	 * By default the strategy is simple: errors that match the {@link #throwablePredicate(Predicate)}
-	 * (by default all) are retried up to {@link #maxAttempts(long)} times.
-	 * <p>
-	 * When the maximum attempt of retries is reached, a runtime exception is propagated downstream which
-	 * can be pinpointed with {@link reactor.core.Exceptions#isRetryExhausted(Throwable)}. The cause of
-	 * the last attempt's failure is attached as said {@link reactor.core.Exceptions#retryExhausted(long, Throwable) retryExhausted}
-	 * exception's cause.
-	 * <p>
-	 * If one of the {@link #minBackoff(Duration)}, {@link #maxBackoff(Duration)}, {@link #jitter(double)}
-	 * or {@link #scheduler(Scheduler)} method is used, the strategy becomes an exponential backoff strategy,
-	 * randomized with a user-provided {@link #jitter(double)} factor between {@code 0.d} (no jitter)
-	 * and {@code 1.0} (default is {@code 0.5}).
-	 * Even with the jitter, the effective backoff delay cannot be less than {@link #minBackoff(Duration)}
-	 * nor more than {@link #maxBackoff(Duration)}. The delays and subsequent attempts are executed on the
-	 * provided backoff {@link #scheduler(Scheduler)}.
-	 * <p>
-	 * Additionally, to help dealing with bursts of transient errors in a long-lived Flux as if each burst
-	 * had its own backoff, one can choose to set {@link #transientErrors(boolean)} to {@code true}.
-	 * The comparison to {@link #maxAttempts(long)} will then be done with the number of subsequent attempts
-	 * that failed without an {@link org.reactivestreams.Subscriber#onNext(Object) onNext} in between.
-	 * <p>
-	 * The {@link Builder} is copy-on-write and as such can be stored as a "template" and further configured
-	 * by different components without a risk of modifying the original configuration.
-	 */
-	class Builder {
-
-		final Duration  minBackoff;
-		final Duration  maxBackoff;
-		final double    jitterFactor;
-		@Nullable
-		final Scheduler backoffScheduler;
-
-		final long                 maxAttempts;
-		final Predicate<Throwable> throwablePredicate;
-		final boolean              isTransientErrors;
-		final boolean              isConfiguredForBackoff;
-
-		final Consumer<RetrySignal> doPreRetry;
-		final Consumer<RetrySignal> doPostRetry;
-		final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry;
-		final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry;
-
-		/**
-		 * Copy constructor.
-		 */
-		Builder(boolean isConfiguredForBackoff, long max,
-				Predicate<? super Throwable> aThrowablePredicate,
-				boolean isTransientErrors,
-				Duration minBackoff, Duration maxBackoff, double jitterFactor,
-				@Nullable Scheduler backoffScheduler,
-				Consumer<RetrySignal> doPreRetry,
-				Consumer<RetrySignal> doPostRetry,
-				BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry,
-				BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry) {
-			this.isConfiguredForBackoff = isConfiguredForBackoff;
-			this.maxAttempts = max;
-			this.throwablePredicate = aThrowablePredicate::test; //massaging type
-			this.isTransientErrors = isTransientErrors;
-			this.minBackoff = minBackoff;
-			this.maxBackoff = maxBackoff;
-			this.jitterFactor = jitterFactor;
-			this.backoffScheduler = backoffScheduler;
-			this.doPreRetry = doPreRetry;
-			this.doPostRetry = doPostRetry;
-			this.asyncPreRetry = asyncPreRetry;
-			this.asyncPostRetry = asyncPostRetry;
-		}
-
-		/**
-		 * Is this {@link Retry.Builder} configured for backing off (ie. have any of the
-		 * {@link #minBackoff(Duration)}, {@link #maxBackoff(Duration)}, {@link #jitter(double)}
-		 * or {@link #scheduler(Scheduler)} methods been called)?
-		 *
-		 * @return true if builder is going to build a backoff function, false for a simple retry function
-		 */
-		public boolean isConfiguredForBackoff() {
-			return this.isConfiguredForBackoff;
-		}
-
-		/**
-		 * Set the maximum number of retry attempts allowed. 1 meaning "1 retry attempt":
-		 * the original subscription plus an extra re-subscription in case of an error, but
-		 * no more.
-		 *
-		 * @param maxAttempts the new retry attempt limit
-		 * @return the builder for further configuration
-		 */
-		public Builder maxAttempts(long maxAttempts) {
-			return new Builder(
-					this.isConfiguredForBackoff,
-					maxAttempts,
-					this.throwablePredicate,
-					this.isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry,
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		/**
-		 * Set the {@link Predicate} that will filter which errors can be retried. Exceptions
-		 * that don't pass the predicate will be propagated downstream and terminate the retry
-		 * sequence. Defaults to allowing retries for all exceptions.
-		 *
-		 * @param predicate the predicate to filter which exceptions can be retried
-		 * @return the builder for further configuration
-		 */
-		public Builder throwablePredicate(Predicate<? super Throwable> predicate) {
-			return new Builder(
-					this.isConfiguredForBackoff,
-					this.maxAttempts,
-					Objects.requireNonNull(predicate, "predicate"),
-					this.isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry,
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		/**
-		 * Allows to augment a previously {@link #throwablePredicate(Predicate) set} {@link Predicate} with
-		 * a new condition to allow retries of some exception or not. This can typically be used with
-		 * {@link Predicate#and(Predicate)} to combine existing predicate(s) with a new one.
-		 * <p>
-		 * For example:
-		 * <pre><code>
-		 * //given
-		 * Builder retryTwiceIllegalArgument = Retry.max(2)
-		 *     .throwablePredicate(e -> e instanceof IllegalArgumentException);
-		 *
-		 * Builder retryTwiceIllegalArgWithCause = retryTwiceIllegalArgument.throwablePredicate(old ->
-		 *     old.and(e -> e.getCause() != null));
-		 * </code></pre>
-		 *
-		 * @param predicateAdjuster a {@link Function} that returns a new {@link Predicate} given the
-		 * currently in place {@link Predicate} (usually deriving from the old predicate).
-		 * @return the builder for further configuration
-		 */
-		public Builder throwablePredicateModifiedWith(
-				Function<Predicate<Throwable>, Predicate<? super Throwable>> predicateAdjuster) {
-			Objects.requireNonNull(predicateAdjuster, "predicateAdjuster");
-			Predicate<? super Throwable> newPredicate = Objects.requireNonNull(predicateAdjuster.apply(this.throwablePredicate),
-					"predicateAdjuster must return a new predicate");
-			return new Builder(
-					this.isConfiguredForBackoff,
-					this.maxAttempts,
-					newPredicate,
-					this.isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry,
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		public Builder andDoBeforeRetry(Consumer<RetrySignal> doBeforeRetry) {
-			return new Builder(
-					this.isConfiguredForBackoff,
-					this.maxAttempts,
-					this.throwablePredicate,
-					this.isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry.andThen(doBeforeRetry),
-					this.doPostRetry,
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		public Builder andDoAfterRetry(Consumer<RetrySignal> doAfterRetry) {
-			return new Builder(
-					this.isConfiguredForBackoff,
-					this.maxAttempts,
-					this.throwablePredicate,
-					this.isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry.andThen(doAfterRetry),
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		public Builder andDelayRetryWith(Function<RetrySignal, Mono<Void>> doAsyncBeforeRetry) {
-			return new Builder(
-					this.isConfiguredForBackoff,
-					this.maxAttempts,
-					this.throwablePredicate,
-					this.isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry,
-					(rs, m) -> asyncPreRetry.apply(rs, m).then(doAsyncBeforeRetry.apply(rs)),
-					this.asyncPostRetry);
-		}
-
-		public Builder andRetryThen(Function<RetrySignal, Mono<Void>> doAsyncAfterRetry) {
-			return new Builder(
-					this.isConfiguredForBackoff,
-					this.maxAttempts,
-					this.throwablePredicate,
-					this.isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry,
-					this.asyncPreRetry,
-					(rs, m) -> asyncPostRetry.apply(rs, m).then(doAsyncAfterRetry.apply(rs)));
-		}
-
-		/**
-		 * Set the transient error mode, indicating that the strategy being built should use
-		 * {@link RetrySignal#failureSubsequentIndex()} rather than {@link RetrySignal#failureTotalIndex()}.
-		 * Transient errors are errors that could occur in bursts but are then recovered from by
-		 * a retry (with one or more onNext signals) before another error occurs.
-		 * <p>
-		 * In simplified mode, this means that the {@link #maxAttempts(long)} is applied
-		 * to each burst individually. In exponential backoff, the backoff is also computed
-		 * based on the index within the burst, meaning the next error after a recovery will
-		 * be retried with a {@link #minBackoff(Duration)} delay.
-		 *
-		 * @param isTransientErrors {@code true} to activate transient mode
-		 * @return the builder for further configuration
-		 */
-		public Builder transientErrors(boolean isTransientErrors) {
-			return new Builder(
-					this.isConfiguredForBackoff,
-					this.maxAttempts,
-					this.throwablePredicate,
-					isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry,
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		/**
-		 * Set the minimum {@link Duration} for the first backoff. This method switches to an
-		 * exponential backoff strategy if not already done so. Defaults to {@link Duration#ZERO}
-		 * when the strategy was initially not a backoff one.
-		 *
-		 * @param minBackoff the minimum backoff {@link Duration}
-		 * @return the builder for further configuration
-		 */
-		public Builder minBackoff(Duration minBackoff) {
-			return new Builder(
-					true,
-					this.maxAttempts,
-					this.throwablePredicate,
-					this.isTransientErrors,
-					Objects.requireNonNull(minBackoff, "minBackoff"),
-					this.maxBackoff,
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry,
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		/**
-		 * Set a hard maximum {@link Duration} for exponential backoffs. This method switches
-		 * to an exponential backoff strategy with a zero minimum backoff if not already a backoff
-		 * strategy. Defaults to {@code Duration.ofMillis(Long.MAX_VALUE)}.
-		 *
-		 * @param maxBackoff the maximum backoff {@link Duration}
-		 * @return the builder for further configuration
-		 */
-		public Builder maxBackoff(Duration maxBackoff) {
-			return new Builder(
-					true,
-					this.maxAttempts,
-					this.throwablePredicate,
-					this.isTransientErrors,
-					this.minBackoff,
-					Objects.requireNonNull(maxBackoff, "maxBackoff"),
-					this.jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry,
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		/**
-		 * Set a jitter factor for exponential backoffs that adds randomness to each backoff. This can
-		 * be helpful in reducing cascading failure due to retry-storms. This method switches to an
-		 * exponential backoff strategy with a zero minimum backoff if not already a backoff strategy.
-		 * Defaults to {@code 0.5} (a jitter of at most 50% of the computed delay).
-		 *
-		 * @param jitterFactor the new jitter factor as a {@code double} between {@code 0d} and {@code 1d}
-		 * @return the builder for further configuration
-		 */
-		public Builder jitter(double jitterFactor) {
-			return new Builder(
-					true,
-					this.maxAttempts,
-					this.throwablePredicate,
-					this.isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					jitterFactor,
-					this.backoffScheduler,
-					this.doPreRetry,
-					this.doPostRetry,
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		/**
-		 * Set a {@link Scheduler} on which to execute the delays computed by the exponential backoff
-		 * strategy. This method switches to an exponential backoff strategy with a zero minimum backoff
-		 * if not already a backoff strategy. Defaults to {@link Schedulers#parallel()} in the backoff
-		 * strategy.
-		 *
-		 * @param backoffScheduler the {@link Scheduler} to use
-		 * @return the builder for further configuration
-		 */
-		public Builder scheduler(Scheduler backoffScheduler) {
-			return new Builder(
-					true,
-					this.maxAttempts,
-					this.throwablePredicate,
-					this.isTransientErrors,
-					this.minBackoff,
-					this.maxBackoff,
-					this.jitterFactor,
-					Objects.requireNonNull(backoffScheduler, "backoffScheduler"),
-					this.doPreRetry,
-					this.doPostRetry,
-					this.asyncPreRetry,
-					this.asyncPostRetry);
-		}
-
-		/**
-		 * Build the configured retry strategy.
-		 *
-		 * @return the retry {@link Retry} based on a companion flux of {@link RetrySignal}
-		 */
-		public Retry build() {
-			if (isConfiguredForBackoff) {
-				return new ExponentialBackoffFunction(this);
-			}
-			return new SimpleRetryFunction(this);
-		}
+	static RetryBuilder maxInARow(long maxInARow) {
+		return new RetryBuilder(maxInARow, t -> true, true, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
 	}
 
 }

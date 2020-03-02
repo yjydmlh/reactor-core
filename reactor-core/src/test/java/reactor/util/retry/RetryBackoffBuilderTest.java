@@ -31,12 +31,22 @@ import reactor.test.StepVerifierOptions;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
-public class RetryBuilderTest {
+public class RetryBackoffBuilderTest {
+
+	@Test
+	public void suppressingSchedulerFails() {
+		assertThatNullPointerException().isThrownBy(() -> Retry.backoff(1, Duration.ZERO).scheduler(null))
+		                                .withMessage("backoffScheduler");
+	}
 
 	@Test
 	public void builderMethodsProduceNewInstances() {
-		RetryBuilder init = Retry.max(1);
+		RetryBackoffBuilder init = Retry.backoff(1, Duration.ZERO);
 		assertThat(init)
+				.isNotSameAs(init.minBackoff(Duration.ofSeconds(1)))
+				.isNotSameAs(init.maxBackoff(Duration.ZERO))
+				.isNotSameAs(init.jitter(0.5d))
+				.isNotSameAs(init.scheduler(Schedulers.parallel()))
 				.isNotSameAs(init.maxAttempts(10))
 				.isNotSameAs(init.throwablePredicate(t -> true))
 				.isNotSameAs(init.throwablePredicateModifiedWith(predicate -> predicate.and(t -> true)))
@@ -50,7 +60,7 @@ public class RetryBuilderTest {
 	@Test
 	public void builderCanBeUsedAsTemplate() {
 		//a base builder can be reused across several Flux with different tuning for each flux
-		RetryBuilder template = Retry.max(1).transientErrors(false);
+		RetryBackoffBuilder template = Retry.backoff(1, Duration.ZERO).transientErrors(false);
 
 		Supplier<Flux<Integer>> transientError = () -> {
 			AtomicInteger errorOnEven = new AtomicInteger();
@@ -85,7 +95,7 @@ public class RetryBuilderTest {
 
 	@Test
 	public void throwablePredicateReplacesThePredicate() {
-		RetryBuilder retryBuilder = Retry.max(1)
+		RetryBackoffBuilder retryBuilder = Retry.backoff(1, Duration.ZERO)
 		                                 .throwablePredicate(t -> t instanceof RuntimeException)
 		                                 .throwablePredicate(t -> t instanceof IllegalStateException);
 
@@ -97,7 +107,7 @@ public class RetryBuilderTest {
 
 	@Test
 	public void throwablePredicateModifierAugmentsThePredicate() {
-		RetryBuilder retryBuilder = Retry.max(1)
+		RetryBackoffBuilder retryBuilder = Retry.backoff(1, Duration.ZERO)
 		                                 .throwablePredicate(t -> t instanceof RuntimeException)
 		                                 .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
 
@@ -110,7 +120,7 @@ public class RetryBuilderTest {
 
 	@Test
 	public void throwablePredicateModifierWorksIfNoPreviousPredicate() {
-		RetryBuilder retryBuilder = Retry.max(1)
+		RetryBackoffBuilder retryBuilder = Retry.backoff(1, Duration.ZERO)
 		                                 .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
 
 		assertThat(retryBuilder.throwablePredicate)
@@ -122,21 +132,21 @@ public class RetryBuilderTest {
 
 	@Test
 	public void throwablePredicateModifierRejectsNullGenerator() {
-		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).throwablePredicateModifiedWith(p -> null))
+		assertThatNullPointerException().isThrownBy(() -> Retry.backoff(1, Duration.ZERO).throwablePredicateModifiedWith(p -> null))
 		                                .withMessage("predicateAdjuster must return a new predicate");
 	}
 
 	@Test
 	public void throwablePredicateModifierRejectsNullFunction() {
-		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).throwablePredicateModifiedWith(null))
+		assertThatNullPointerException().isThrownBy(() -> Retry.backoff(1, Duration.ZERO).throwablePredicateModifiedWith(null))
 		                                .withMessage("predicateAdjuster");
 	}
 
 	@Test
 	public void doBeforeRetryIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBuilder retryBuilder = Retry
-				.max(1)
+		RetryBackoffBuilder retryBuilder = Retry
+				.backoff(1, Duration.ZERO)
 				.andDoBeforeRetry(rs -> atomic.incrementAndGet())
 				.andDoBeforeRetry(rs -> atomic.addAndGet(100));
 
@@ -148,8 +158,8 @@ public class RetryBuilderTest {
 	@Test
 	public void doAfterRetryIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBuilder retryBuilder = Retry
-				.max(1)
+		RetryBackoffBuilder retryBuilder = Retry
+				.backoff(1, Duration.ZERO)
 				.andDoAfterRetry(rs -> atomic.incrementAndGet())
 				.andDoAfterRetry(rs -> atomic.addAndGet(100));
 
@@ -161,8 +171,8 @@ public class RetryBuilderTest {
 	@Test
 	public void delayRetryWithIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBuilder retryBuilder = Retry
-				.max(1)
+		RetryBackoffBuilder retryBuilder = Retry
+				.backoff(1, Duration.ZERO)
 				.andDelayRetryWith(rs -> Mono.fromRunnable(atomic::incrementAndGet))
 				.andDelayRetryWith(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
 
@@ -174,8 +184,8 @@ public class RetryBuilderTest {
 	@Test
 	public void retryThenIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBuilder retryBuilder = Retry
-				.max(1)
+		RetryBackoffBuilder retryBuilder = Retry
+				.backoff(1, Duration.ZERO)
 				.andRetryThen(rs -> Mono.fromRunnable(atomic::incrementAndGet))
 				.andRetryThen(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
 

@@ -7260,10 +7260,11 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	}
 
 	/**
-	 * Retries this {@link Flux} in case of errors, as configured by the {@link Function} supplied
-	 * (typically a {@link Retry.Builder}, or a custom function derived from a companion flux of
-	 * {@link Retry.RetrySignal}). The output is a {@link Publisher} that can emit an arbitrary object
-	 * to signal a retry is allowed, and when the resubscription must occur.
+	 * Retries this {@link Flux} in case of errors, as configured by the {@link Retry retry strategy} supplied
+	 * (typically customized through the {@link Retry#max(long)} or {@link Retry#backoff(long, Duration)} builder,
+	 * or provided as a custom function). The {@link Retry} decision is derived from a companion flux of {@link Retry.RetrySignal}),
+	 * mapped to a {@link Publisher} that can emit an arbitrary object to signal a retry is allowed,
+	 * and <strong>when</strong> the resubscription must occur.
 	 * <p>
 	 * Note that the {@link Retry.RetrySignal} state can be transient and change between each source
 	 * {@link org.reactivestreams.Subscriber#onError(Throwable) onError} or
@@ -7271,7 +7272,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * this could lead to the represented state being out of sync with the state at which the retry
 	 * was evaluated. Map it to {@link Retry.RetrySignal#retain()} right away to mediate this.
 	 *
-	 * @param strategy a {@link Retry} strategy to configure retries, typically generated via a {@link Retry.Builder}
+	 * @param strategy a {@link Retry} strategy to configure retries, typically generated via one of the builders exposed on the class
 	 * @return a {@link Flux} that retries on onError
 	 * @see Retry#max(long)
 	 * @see Retry#maxInARow(long)
@@ -7314,7 +7315,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 */
 	@Deprecated
 	public final Flux<T> retryBackoff(long numRetries, Duration firstBackoff) {
-		return retryWhen(Retry.backoff(numRetries, firstBackoff).build());
+		return retryWhen(Retry.backoff(numRetries, firstBackoff));
 	}
 
 	/**
@@ -7354,8 +7355,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	public final Flux<T> retryBackoff(long numRetries, Duration firstBackoff, Duration maxBackoff) {
 		return retryWhen(Retry
 				.backoff(numRetries, firstBackoff)
-				.maxBackoff(maxBackoff)
-				.build());
+				.maxBackoff(maxBackoff));
 	}
 
 	/**
@@ -7398,8 +7398,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 		return retryWhen(Retry
 				.backoff(numRetries, firstBackoff)
 				.maxBackoff(maxBackoff)
-				.scheduler(backoffScheduler)
-				.build());
+				.scheduler(backoffScheduler));
 	}
 
 	/**
@@ -7442,8 +7441,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 		return retryWhen(Retry
 				.backoff(numRetries, firstBackoff)
 				.maxBackoff(maxBackoff)
-				.jitter(jitterFactor)
-				.build());
+				.jitter(jitterFactor));
 	}
 
 	/**
@@ -7490,8 +7488,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 				.backoff(numRetries, firstBackoff)
 				.maxBackoff(maxBackoff)
 				.jitter(jitterFactor)
-				.scheduler(backoffScheduler)
-				.build());
+				.scheduler(backoffScheduler));
 	}
 
 	/**

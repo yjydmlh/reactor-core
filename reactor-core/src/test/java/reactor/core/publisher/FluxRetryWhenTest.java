@@ -43,6 +43,7 @@ import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.context.Context;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
+import reactor.util.retry.RetryBuilder;
 import reactor.util.retry.Retry;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -671,14 +672,14 @@ public class FluxRetryWhenTest {
 		final Duration INIT = Duration.ofSeconds(10);
 
 		StepVerifier.withVirtualTime(() -> {
-			Retry.Builder retryBuilder = Retry
+			Retry retryBuilder = Retry
 					//with pure exponential, 80 retries would overflow Duration's capacity
 					.backoff(80, INIT)
 					.maxBackoff(EXPLICIT_MAX)
 					.jitter(0d);
 
 			return Flux.error(new IllegalStateException("boom"))
-			    .retryWhen(retryBuilder.build());
+			    .retryWhen(retryBuilder);
 		})
 		            .expectSubscription()
 		            .thenAwait(Duration.ofNanos(Long.MAX_VALUE))
@@ -746,8 +747,7 @@ public class FluxRetryWhenTest {
 				Retry.backoff(2, Duration.ZERO)
 				     .maxBackoff(Duration.ofMillis(100))
 				     .jitter(0d)
-				     .transientErrors(false)
-				     .build();
+				     .transientErrors(false);
 
 		new FluxRetryWhen<>(source, retryFunction)
 				.as(StepVerifier::create)
@@ -764,8 +764,7 @@ public class FluxRetryWhenTest {
 				Retry.backoff(2, Duration.ZERO)
 				     .maxBackoff(Duration.ofMillis(100))
 				     .jitter(0d)
-				     .transientErrors(true)
-				     .build();
+				     .transientErrors(true);
 
 		new FluxRetryWhen<>(source, retryFunction)
 				.as(StepVerifier::create)
@@ -780,8 +779,7 @@ public class FluxRetryWhenTest {
 
 		Retry retryFunction =
 				Retry.max(2)
-				     .transientErrors(true)
-				     .build();
+				     .transientErrors(true);
 
 		new FluxRetryWhen<>(source, retryFunction)
 				.as(StepVerifier::create)
@@ -845,7 +843,6 @@ public class FluxRetryWhenTest {
 						.maxBackoff(Duration.ofMinutes(1))
 						.jitter(0d)
 						.transientErrors(true)
-						.build()
 				)
 				      .take(stopAfterCycles * elementPerCycle)
 				      .elapsed()
@@ -865,7 +862,7 @@ public class FluxRetryWhenTest {
 		AtomicInteger beforeHookTracker = new AtomicInteger();
 		AtomicInteger afterHookTracker = new AtomicInteger();
 
-		Retry.Builder builder = Retry
+		Retry retryBuilder = Retry
 				.max(1)
 				.andDoBeforeRetry(s -> System.out.println("About to retry: " + s))
 				.andDoBeforeRetry(s -> System.out.println("About to retry, tracking " + beforeHookTracker.incrementAndGet()))
@@ -877,7 +874,7 @@ public class FluxRetryWhenTest {
 				.andRetryThen(s -> Mono.fromRunnable(() -> afterHookTracker.addAndGet(100)));
 
 		Mono.error(new IllegalStateException("boom"))
-		    .retryWhen(builder.build())
+		    .retryWhen(retryBuilder)
 		    .as(StepVerifier::create)
 		    .verifyError();
 
@@ -890,7 +887,7 @@ public class FluxRetryWhenTest {
 		AtomicInteger beforeHookTracker = new AtomicInteger();
 		AtomicInteger afterHookTracker = new AtomicInteger();
 
-		Retry.Builder builder = Retry
+		Retry retryBuilder = Retry
 				.maxInARow(2)
 				.andDoBeforeRetry(s -> System.out.println("\nAbout to retry: " + s))
 				.andDoBeforeRetry(s -> System.out.println("About to retry, tracking " + beforeHookTracker.incrementAndGet()))
@@ -902,7 +899,7 @@ public class FluxRetryWhenTest {
 				.andRetryThen(s -> Mono.fromRunnable(() -> System.out.println("Did retry async, tracking " + afterHookTracker.addAndGet(100))));
 
 		transientErrorSource()
-				.retryWhen(builder.build())
+				.retryWhen(retryBuilder)
 				.blockLast();
 
 		assertThat(beforeHookTracker).as("before hooks cumulated").hasValue(606);
