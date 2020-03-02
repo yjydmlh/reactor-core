@@ -17,14 +17,16 @@
 package reactor.util.retry;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import org.junit.Test;
 
 import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxRetryWhenTest;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
@@ -234,6 +236,153 @@ public class RetryBackoffBuilderTest {
 	public void defaultRetryExhaustedMessageWithTransientErrors() {
 		assertThat(RetryBackoffBuilder.BACKOFF_EXCEPTION_GENERATOR.apply(Retry.backoff(123, Duration.ZERO), new ImmutableRetrySignal(123, 12, null)))
 				.hasMessage("Retries exhausted: 123/123 (12 in a row)");
+	}
+
+	@Test
+	public void companionWaitsForAllHooksBeforeTrigger() {
+		//this tests the companion directly, vs cumulatedRetryHooks which test full integration in the retryWhen operator
+		IllegalArgumentException ignored = new IllegalArgumentException("ignored");
+		Retry.RetrySignal sig1 = new ImmutableRetrySignal(1, 1, ignored);
+		Retry.RetrySignal sig2 = new ImmutableRetrySignal(2, 1, ignored);
+		Retry.RetrySignal sig3 = new ImmutableRetrySignal(3, 1, ignored);
+
+		RetryBackoffBuilder retryBuilder = Retry.backoff(10, Duration.ZERO).andRetryThen(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.failureTotalIndex()))).then());
+
+		StepVerifier.create(retryBuilder.generateCompanion(Flux.just(sig1, sig2, sig3).hide()))
+		            .expectNext(1L, 2L, 3L)
+		            .verifyComplete();
+	}
+
+	@Test
+	public void cumulatedRetryHooks() {
+		List<String> order = new CopyOnWriteArrayList<>();
+		AtomicInteger beforeHookTracker = new AtomicInteger();
+		AtomicInteger afterHookTracker = new AtomicInteger();
+
+		Retry retryBuilder = Retry
+				.backoff(1, Duration.ZERO)
+				.andDoBeforeRetry(s -> order.add("SyncBefore A: " + s))
+				.andDoBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
+				.andDoAfterRetry(s -> order.add("SyncAfter A: " + s))
+				.andDoAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
+				.andDelayRetryWith(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
+				.andDelayRetryWith(s -> Mono.fromRunnable(() -> {
+					order.add("AsyncBefore D");
+					beforeHookTracker.addAndGet(100);
+				}))
+				.andRetryThen(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
+				.andRetryThen(s -> Mono.fromRunnable(() -> {
+					order.add("AsyncAfter D");
+					afterHookTracker.addAndGet(100);
+				}));
+
+		Mono.error(new IllegalStateException("boom"))
+		    .retryWhen(retryBuilder)
+		    .as(StepVerifier::create)
+		    .verifyError();
+
+		assertThat(beforeHookTracker).hasValue(101);
+		assertThat(afterHookTracker).hasValue(101);
+
+		assertThat(order).containsExactly(
+				"SyncBefore A: attempt #1 (1 in a row), last failure={java.lang.IllegalStateException: boom}",
+				"SyncBefore B, tracking 1",
+				"AsyncBefore C",
+				"AsyncBefore D",
+				"SyncAfter A: attempt #1 (1 in a row), last failure={java.lang.IllegalStateException: boom}",
+				"SyncAfter B, tracking 1",
+				"AsyncAfter C attempt #1 (1 in a row), last failure={java.lang.IllegalStateException: boom}",
+				"AsyncAfter D"
+		);
+	}
+
+	@Test
+	public void cumulatedRetryHooksWithTransient() {
+		List<String> order = new CopyOnWriteArrayList<>();
+		AtomicInteger beforeHookTracker = new AtomicInteger();
+		AtomicInteger afterHookTracker = new AtomicInteger();
+
+		Retry retryBuilder = Retry
+				.backoff(2, Duration.ZERO)
+				.maxBackoff(Duration.ZERO)
+				.transientErrors(true)
+				.andDoBeforeRetry(s -> order.add("SyncBefore A: " + s))
+				.andDoBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
+				.andDoAfterRetry(s -> order.add("SyncAfter A: " + s))
+				.andDoAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
+				.andDelayRetryWith(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
+				.andDelayRetryWith(s -> Mono.fromRunnable(() -> {
+					order.add("AsyncBefore D");
+					beforeHookTracker.addAndGet(100);
+				}))
+				.andRetryThen(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
+				.andRetryThen(s -> Mono.fromRunnable(() -> {
+					order.add("AsyncAfter D");
+					afterHookTracker.addAndGet(100);
+				}));
+
+		FluxRetryWhenTest.transientErrorSource()
+		                 .retryWhen(retryBuilder)
+		                 .blockLast();
+
+		assertThat(beforeHookTracker).as("before hooks cumulated").hasValue(606);
+		assertThat(afterHookTracker).as("after hooks cumulated").hasValue(606);
+
+		assertThat(order).containsExactly(
+				"SyncBefore A: attempt #1 (1 in a row), last failure={java.lang.IllegalStateException: failing on step 1}",
+				"SyncBefore B, tracking 1",
+				"AsyncBefore C",
+				"AsyncBefore D",
+				"SyncAfter A: attempt #1 (1 in a row), last failure={java.lang.IllegalStateException: failing on step 1}",
+				"SyncAfter B, tracking 1",
+				"AsyncAfter C attempt #1 (1 in a row), last failure={java.lang.IllegalStateException: failing on step 1}",
+				"AsyncAfter D",
+
+				"SyncBefore A: attempt #2 (2 in a row), last failure={java.lang.IllegalStateException: failing on step 2}",
+				"SyncBefore B, tracking 102",
+				"AsyncBefore C",
+				"AsyncBefore D",
+				"SyncAfter A: attempt #2 (2 in a row), last failure={java.lang.IllegalStateException: failing on step 2}",
+				"SyncAfter B, tracking 102",
+				"AsyncAfter C attempt #2 (2 in a row), last failure={java.lang.IllegalStateException: failing on step 2}",
+				"AsyncAfter D",
+
+				"SyncBefore A: attempt #3 (1 in a row), last failure={java.lang.IllegalStateException: failing on step 5}",
+				"SyncBefore B, tracking 203",
+				"AsyncBefore C",
+				"AsyncBefore D",
+				"SyncAfter A: attempt #3 (1 in a row), last failure={java.lang.IllegalStateException: failing on step 5}",
+				"SyncAfter B, tracking 203",
+				"AsyncAfter C attempt #3 (1 in a row), last failure={java.lang.IllegalStateException: failing on step 5}",
+				"AsyncAfter D",
+
+				"SyncBefore A: attempt #4 (2 in a row), last failure={java.lang.IllegalStateException: failing on step 6}",
+				"SyncBefore B, tracking 304",
+				"AsyncBefore C",
+				"AsyncBefore D",
+				"SyncAfter A: attempt #4 (2 in a row), last failure={java.lang.IllegalStateException: failing on step 6}",
+				"SyncAfter B, tracking 304",
+				"AsyncAfter C attempt #4 (2 in a row), last failure={java.lang.IllegalStateException: failing on step 6}",
+				"AsyncAfter D",
+
+				"SyncBefore A: attempt #5 (1 in a row), last failure={java.lang.IllegalStateException: failing on step 9}",
+				"SyncBefore B, tracking 405",
+				"AsyncBefore C",
+				"AsyncBefore D",
+				"SyncAfter A: attempt #5 (1 in a row), last failure={java.lang.IllegalStateException: failing on step 9}",
+				"SyncAfter B, tracking 405",
+				"AsyncAfter C attempt #5 (1 in a row), last failure={java.lang.IllegalStateException: failing on step 9}",
+				"AsyncAfter D",
+
+				"SyncBefore A: attempt #6 (2 in a row), last failure={java.lang.IllegalStateException: failing on step 10}",
+				"SyncBefore B, tracking 506",
+				"AsyncBefore C",
+				"AsyncBefore D",
+				"SyncAfter A: attempt #6 (2 in a row), last failure={java.lang.IllegalStateException: failing on step 10}",
+				"SyncAfter B, tracking 506",
+				"AsyncAfter C attempt #6 (2 in a row), last failure={java.lang.IllegalStateException: failing on step 10}",
+				"AsyncAfter D"
+		);
 	}
 
 }

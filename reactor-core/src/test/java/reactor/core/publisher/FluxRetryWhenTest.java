@@ -43,7 +43,6 @@ import reactor.test.subscriber.AssertSubscriber;
 import reactor.util.context.Context;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
-import reactor.util.retry.RetryBuilder;
 import reactor.util.retry.Retry;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -788,37 +787,6 @@ public class FluxRetryWhenTest {
 				.verify(Duration.ofSeconds(2));
 	}
 
-	private Flux<Integer> transientErrorSource() {
-		AtomicInteger count = new AtomicInteger();
-		return Flux.generate(sink -> {
-			int step = count.incrementAndGet();
-			switch (step) {
-				case 1:
-				case 2:
-				case 5:
-				case 6:
-				case 9:
-				case 10:
-					sink.error(new IllegalStateException("failing on step " + step));
-					break;
-				case 3: //should reset
-				case 4: //should NOT reset
-				case 7: //should reset
-				case 8: //should NOT reset
-				case 11: //should reset
-					sink.next(step);
-					break;
-				case 12:
-					sink.next(step); //should NOT reset
-					sink.complete();
-					break;
-				default:
-					sink.complete();
-					break;
-			}
-		});
-	}
-
 	@Test
 	public void gh1978() {
 		final int elementPerCycle = 3;
@@ -857,52 +825,36 @@ public class FluxRetryWhenTest {
 		assertThat(pauses).allMatch(p -> p == 1, "pause is constantly 1s");
 	}
 
-	@Test
-	public void cumulatedRetryHooks() {
-		AtomicInteger beforeHookTracker = new AtomicInteger();
-		AtomicInteger afterHookTracker = new AtomicInteger();
 
-		Retry retryBuilder = Retry
-				.max(1)
-				.andDoBeforeRetry(s -> System.out.println("About to retry: " + s))
-				.andDoBeforeRetry(s -> System.out.println("About to retry, tracking " + beforeHookTracker.incrementAndGet()))
-				.andDoAfterRetry(s -> System.out.println("Did retry: " + s))
-				.andDoAfterRetry(s -> System.out.println("Did to retry, tracking " + afterHookTracker.incrementAndGet()))
-				.andDelayRetryWith(s -> Mono.delay(Duration.ofSeconds(1)).then())
-				.andDelayRetryWith(s -> Mono.fromRunnable(() -> beforeHookTracker.addAndGet(100)))
-				.andRetryThen(s -> Mono.delay(Duration.ofSeconds(1)).doOnNext(delayed -> System.out.println("Post retry async " + s)).then())
-				.andRetryThen(s -> Mono.fromRunnable(() -> afterHookTracker.addAndGet(100)));
-
-		Mono.error(new IllegalStateException("boom"))
-		    .retryWhen(retryBuilder)
-		    .as(StepVerifier::create)
-		    .verifyError();
-
-		assertThat(beforeHookTracker).hasValue(101);
-		assertThat(afterHookTracker).hasValue(101);
+	public static Flux<Integer> transientErrorSource() {
+		AtomicInteger count = new AtomicInteger();
+		return Flux.generate(sink -> {
+			int step = count.incrementAndGet();
+			switch (step) {
+				case 1:
+				case 2:
+				case 5:
+				case 6:
+				case 9:
+				case 10:
+					sink.error(new IllegalStateException("failing on step " + step));
+					break;
+				case 3: //should reset
+				case 4: //should NOT reset
+				case 7: //should reset
+				case 8: //should NOT reset
+				case 11: //should reset
+					sink.next(step);
+					break;
+				case 12:
+					sink.next(step); //should NOT reset
+					sink.complete();
+					break;
+				default:
+					sink.complete();
+					break;
+			}
+		});
 	}
 
-	@Test
-	public void cumulatedRetryHooksWithTransient() {
-		AtomicInteger beforeHookTracker = new AtomicInteger();
-		AtomicInteger afterHookTracker = new AtomicInteger();
-
-		Retry retryBuilder = Retry
-				.maxInARow(2)
-				.andDoBeforeRetry(s -> System.out.println("\nAbout to retry: " + s))
-				.andDoBeforeRetry(s -> System.out.println("About to retry, tracking " + beforeHookTracker.incrementAndGet()))
-				.andDoAfterRetry(s -> System.out.println("Did retry: " + s))
-				.andDoAfterRetry(s -> System.out.println("Did retry, tracking " + afterHookTracker.incrementAndGet()))
-				.andDelayRetryWith(s -> Mono.delay(Duration.ofMillis(100)).doOnNext(delayed -> System.out.println("Pre retry delay: " + s)).then())
-				.andDelayRetryWith(s -> Mono.fromRunnable(() -> System.out.println("Pre retry delay, tracking " + beforeHookTracker.addAndGet(100))))
-				.andRetryThen(s -> Mono.delay(Duration.ofMillis(100)).doOnNext(delayed -> System.out.println("Did retry async: " + s)).then())
-				.andRetryThen(s -> Mono.fromRunnable(() -> System.out.println("Did retry async, tracking " + afterHookTracker.addAndGet(100))));
-
-		transientErrorSource()
-				.retryWhen(retryBuilder)
-				.blockLast();
-
-		assertThat(beforeHookTracker).as("before hooks cumulated").hasValue(606);
-		assertThat(afterHookTracker).as("after hooks cumulated").hasValue(606);
-	}
 }

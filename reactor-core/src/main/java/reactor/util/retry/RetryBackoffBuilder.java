@@ -24,8 +24,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
-import org.reactivestreams.Publisher;
-
 import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -459,9 +457,9 @@ public final class RetryBackoffBuilder implements Retry {
 	}
 
 	@Override
-	public Publisher<?> generateCompanion(Flux<RetrySignal> t) {
+	public Flux<Long> generateCompanion(Flux<RetrySignal> t) {
 		validateArguments();
-		return t.flatMap(retryWhenState -> {
+		return t.concatMap(retryWhenState -> {
 			//capture the state immediately
 			RetrySignal copy = retryWhenState.retain();
 			Throwable currentFailure = copy.failure();
