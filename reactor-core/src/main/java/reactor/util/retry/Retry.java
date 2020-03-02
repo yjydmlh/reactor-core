@@ -103,7 +103,8 @@ public interface Retry {
 	 */
 	static RetryBackoffBuilder backoff(long maxAttempts, Duration minBackoff) {
 		return new RetryBackoffBuilder(maxAttempts, t -> true, false, minBackoff, MAX_BACKOFF, 0.5d, Schedulers.parallel(),
-				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
+				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION,
+				RetryBackoffBuilder.BACKOFF_EXCEPTION_GENERATOR);
 	}
 
 	/**
@@ -114,7 +115,8 @@ public interface Retry {
 	 * @see RetryBuilder#maxAttempts(long)
 	 */
 	static RetryBuilder max(long max) {
-		return new RetryBuilder(max, t -> true, false, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
+		return new RetryBuilder(max, t -> true, false, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION,
+				RetryBuilder.RETRY_EXCEPTION_GENERATOR);
 	}
 
 	/**
@@ -128,7 +130,8 @@ public interface Retry {
 	 * @see RetryBuilder#transientErrors(boolean)
 	 */
 	static RetryBuilder maxInARow(long maxInARow) {
-		return new RetryBuilder(maxInARow, t -> true, true, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION);
+		return new RetryBuilder(maxInARow, t -> true, true, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION,
+				RETRY_EXCEPTION_GENERATOR);
 	}
 
 }

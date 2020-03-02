@@ -18,10 +18,12 @@ package reactor.util.retry;
 
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import org.junit.Test;
 
+import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -54,7 +56,8 @@ public class RetryBackoffBuilderTest {
 				.isNotSameAs(init.andDoBeforeRetry(rs -> {}))
 				.isNotSameAs(init.andDoAfterRetry(rs -> {}))
 				.isNotSameAs(init.andDelayRetryWith(rs -> Mono.empty()))
-				.isNotSameAs(init.andRetryThen(rs -> Mono.empty()));
+				.isNotSameAs(init.andRetryThen(rs -> Mono.empty()))
+				.isNotSameAs(init.onRetryExhaustedThrow((b, rs) -> new IllegalStateException("boon")));
 	}
 
 	@Test
@@ -85,7 +88,7 @@ public class RetryBackoffBuilderTest {
 		            .expectNext(1, 3)
 		            .verifyErrorSatisfies(t -> assertThat(t)
 				            .isInstanceOf(IllegalStateException.class)
-				            .hasMessage("Retries exhausted: 2/2")
+				            .hasMessage("Retries exhausted: 2/2 (0 in a row)")
 				            .hasCause(new IllegalStateException("boom 4")));
 
 		StepVerifier.create(modifiedTemplate2, StepVerifierOptions.create().scenarioName("modified template 2"))
@@ -192,6 +195,45 @@ public class RetryBackoffBuilderTest {
 		retryBuilder.asyncPostRetry.apply(null, Mono.empty()).block();
 
 		assertThat(atomic).hasValue(101);
+	}
+
+	@Test
+	public void retryExceptionDefaultsToRetryExhausted() {
+		RetryBackoffBuilder retryBuilder = Retry.backoff(50, Duration.ZERO);
+
+		final ImmutableRetrySignal trigger = new ImmutableRetrySignal(100, 21, new IllegalStateException("boom"));
+
+		StepVerifier.create(retryBuilder.generateCompanion(Flux.just(trigger)))
+		            .expectErrorSatisfies(e -> assertThat(e).matches(Exceptions::isRetryExhausted, "isRetryExhausted")
+		                                                    .hasMessage("Retries exhausted: 100/50 (21 in a row)")
+		                                                    .hasCause(new IllegalStateException("boom")))
+		            .verify();
+	}
+
+	@Test
+	public void retryExceptionCanBeCustomized() {
+		RetryBackoffBuilder retryBuilder = Retry.backoff(1, Duration.ofMillis(123))
+				.onRetryExhaustedThrow((builder, rs) -> new IllegalArgumentException(builder.minBackoff.toString()));
+
+		final ImmutableRetrySignal trigger = new ImmutableRetrySignal(100, 21, new IllegalStateException("boom"));
+
+		StepVerifier.create(retryBuilder.generateCompanion(Flux.just(trigger)))
+		            .expectErrorSatisfies(e -> assertThat(e).matches(t -> !Exceptions.isRetryExhausted(t), "is not retryExhausted")
+		                                                    .hasMessage("PT0.123S")
+		                                                    .hasNoCause())
+		            .verify();
+	}
+
+	@Test
+	public void defaultRetryExhaustedMessageWithNoTransientErrors() {
+		assertThat(RetryBackoffBuilder.BACKOFF_EXCEPTION_GENERATOR.apply(Retry.backoff(123, Duration.ZERO), new ImmutableRetrySignal(123, 123, null)))
+				.hasMessage("Retries exhausted: 123/123");
+	}
+
+	@Test
+	public void defaultRetryExhaustedMessageWithTransientErrors() {
+		assertThat(RetryBackoffBuilder.BACKOFF_EXCEPTION_GENERATOR.apply(Retry.backoff(123, Duration.ZERO), new ImmutableRetrySignal(123, 12, null)))
+				.hasMessage("Retries exhausted: 123/123 (12 in a row)");
 	}
 
 }

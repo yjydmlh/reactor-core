@@ -508,8 +508,8 @@ public class ExceptionsTest {
 
 	@Test
 	public void isRetryExhausted() {
-		Throwable match1 = Exceptions.retryExhausted(Duration.ofSeconds(1));
-		Throwable match2 = Exceptions.retryExhausted(30, new RuntimeException("cause: boom"));
+		Throwable match1 = Exceptions.retryExhausted("only a message", null);
+		Throwable match2 = Exceptions.retryExhausted("message and cause", new RuntimeException("cause: boom"));
 		Throwable noMatch = new IllegalStateException("Retry exhausted: 10/10");
 
 		assertThat(Exceptions.isRetryExhausted(null)).as("null").isFalse();
@@ -519,34 +519,18 @@ public class ExceptionsTest {
 	}
 
 	@Test
-	public void retryExhaustedMessageWithAttempts() {
-		Throwable retryExhausted = Exceptions.retryExhausted(30, new RuntimeException("boom"));
+	public void retryExhaustedMessageWithNoCause() {
+		Throwable retryExhausted = Exceptions.retryExhausted("message with no cause", null);
 
-		assertThat(retryExhausted).hasMessage("Retries exhausted: 30/30")
+		assertThat(retryExhausted).hasMessage("message with no cause")
+		                          .hasNoCause();
+	}
+
+	@Test
+	public void retryExhaustedMessageWithCause() {
+		Throwable retryExhausted = Exceptions.retryExhausted("message with cause", new RuntimeException("boom"));
+
+		assertThat(retryExhausted).hasMessage("message with cause")
 		                          .hasCause(new RuntimeException("boom"));
-	}
-
-	@Test
-	public void retryExhaustedMessageWithDurationDays() {
-		Throwable retryExhausted = Exceptions.retryExhausted(Duration.ofDays(3));
-
-		assertThat(retryExhausted).hasMessage("Retries exhausted: timed out after 259200000ms (PT72H)")
-		                          .hasNoCause();
-	}
-
-	@Test
-	public void retryExhaustedMessageWithDurationMillis() {
-		Throwable retryExhausted = Exceptions.retryExhausted(Duration.ofMillis(123));
-
-		assertThat(retryExhausted).hasMessage("Retries exhausted: timed out after 123ms (PT0.123S)")
-		                          .hasNoCause();
-	}
-
-	@Test
-	public void retryExhaustedMessageWithDurationNanos() {
-		Throwable retryExhausted = Exceptions.retryExhausted(Duration.ofNanos(123));
-
-		assertThat(retryExhausted).hasMessage("Retries exhausted: timed out after 0ms (PT0.000000123S)")
-		                          .hasNoCause();
 	}
 }

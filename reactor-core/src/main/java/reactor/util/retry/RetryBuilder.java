@@ -35,8 +35,8 @@ import reactor.core.publisher.Mono;
  * <p>
  * When the maximum attempt of retries is reached, a runtime exception is propagated downstream which
  * can be pinpointed with {@link reactor.core.Exceptions#isRetryExhausted(Throwable)}. The cause of
- * the last attempt's failure is attached as said {@link reactor.core.Exceptions#retryExhausted(long, Throwable) retryExhausted}
- * exception's cause.
+ * the last attempt's failure is attached as said {@link reactor.core.Exceptions#retryExhausted(String, Throwable) retryExhausted}
+ * exception's cause. This can be customized with {@link #onRetryExhaustedThrow(BiFunction)}.
  * <p>
  * Additionally, to help dealing with bursts of transient errors in a long-lived Flux as if each burst
  * had its own attempt counter, one can choose to set {@link #transientErrors(boolean)} to {@code true}.
@@ -50,14 +50,29 @@ import reactor.core.publisher.Mono;
  */
 public final class RetryBuilder implements Retry {
 
+	static final Duration                                        MAX_BACKOFF                 = Duration.ofMillis(Long.MAX_VALUE);
+	static final Consumer<RetrySignal>                           NO_OP_CONSUMER              = rs -> {};
+	static final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> NO_OP_BIFUNCTION            = (rs, m) -> m;
+
+
+	static final BiFunction<RetryBuilder, RetrySignal, Throwable>
+			RETRY_EXCEPTION_GENERATOR = (builder, rs) ->
+			Exceptions.retryExhausted("Retries exhausted: " + rs.failureTotalIndex() + "/" + builder.maxAttempts +
+					(rs.failureSubsequentIndex() != rs.failureTotalIndex()
+							? " (" + rs.failureSubsequentIndex() + " in a row)"
+							: ""
+					), rs.failure());
+
 	final long                 maxAttempts;
 	final Predicate<Throwable> throwablePredicate;
 	final boolean              isTransientErrors;
 
-	final Consumer<Retry.RetrySignal>                           doPreRetry;
-	final Consumer<Retry.RetrySignal>                           doPostRetry;
-	final BiFunction<Retry.RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry;
-	final BiFunction<Retry.RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry;
+	final Consumer<RetrySignal>                           doPreRetry;
+	final Consumer<RetrySignal>                           doPostRetry;
+	final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry;
+	final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry;
+
+	final BiFunction<RetryBuilder, RetrySignal, Throwable> retryExhaustedGenerator;
 
 	/**
 	 * Copy constructor.
@@ -65,10 +80,11 @@ public final class RetryBuilder implements Retry {
 	RetryBuilder(long max,
 			Predicate<? super Throwable> aThrowablePredicate,
 			boolean isTransientErrors,
-			Consumer<Retry.RetrySignal> doPreRetry,
-			Consumer<Retry.RetrySignal> doPostRetry,
-			BiFunction<Retry.RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry,
-			BiFunction<Retry.RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry) {
+			Consumer<RetrySignal> doPreRetry,
+			Consumer<RetrySignal> doPostRetry,
+			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry,
+			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry,
+			BiFunction<RetryBuilder, RetrySignal, Throwable> retryExhaustedGenerator) {
 		this.maxAttempts = max;
 		this.throwablePredicate = aThrowablePredicate::test; //massaging type
 		this.isTransientErrors = isTransientErrors;
@@ -76,6 +92,7 @@ public final class RetryBuilder implements Retry {
 		this.doPostRetry = doPostRetry;
 		this.asyncPreRetry = asyncPreRetry;
 		this.asyncPostRetry = asyncPostRetry;
+		this.retryExhaustedGenerator = retryExhaustedGenerator;
 	}
 
 	/**
@@ -94,7 +111,8 @@ public final class RetryBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -113,7 +131,8 @@ public final class RetryBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -147,11 +166,12 @@ public final class RetryBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExhaustedGenerator);
 	}
 
 	public RetryBuilder andDoBeforeRetry(
-			Consumer<Retry.RetrySignal> doBeforeRetry) {
+			Consumer<RetrySignal> doBeforeRetry) {
 		return new RetryBuilder(
 				this.maxAttempts,
 				this.throwablePredicate,
@@ -159,10 +179,11 @@ public final class RetryBuilder implements Retry {
 				this.doPreRetry.andThen(doBeforeRetry),
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExhaustedGenerator);
 	}
 
-	public RetryBuilder andDoAfterRetry(Consumer<Retry.RetrySignal> doAfterRetry) {
+	public RetryBuilder andDoAfterRetry(Consumer<RetrySignal> doAfterRetry) {
 		return new RetryBuilder(
 				this.maxAttempts,
 				this.throwablePredicate,
@@ -170,11 +191,12 @@ public final class RetryBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry.andThen(doAfterRetry),
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExhaustedGenerator);
 	}
 
 	public RetryBuilder andDelayRetryWith(
-			Function<Retry.RetrySignal, Mono<Void>> doAsyncBeforeRetry) {
+			Function<RetrySignal, Mono<Void>> doAsyncBeforeRetry) {
 		return new RetryBuilder(
 				this.maxAttempts,
 				this.throwablePredicate,
@@ -182,11 +204,12 @@ public final class RetryBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				(rs, m) -> asyncPreRetry.apply(rs, m).then(doAsyncBeforeRetry.apply(rs)),
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExhaustedGenerator);
 	}
 
 	public RetryBuilder andRetryThen(
-			Function<Retry.RetrySignal, Mono<Void>> doAsyncAfterRetry) {
+			Function<RetrySignal, Mono<Void>> doAsyncAfterRetry) {
 		return new RetryBuilder(
 				this.maxAttempts,
 				this.throwablePredicate,
@@ -194,7 +217,30 @@ public final class RetryBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				(rs, m) -> asyncPostRetry.apply(rs, m).then(doAsyncAfterRetry.apply(rs)));
+				(rs, m) -> asyncPostRetry.apply(rs, m).then(doAsyncAfterRetry.apply(rs)),
+				this.retryExhaustedGenerator);
+	}
+
+	/**
+	 * Set the generator for the {@link Exception} to be propagated when the maximum amount of retries
+	 * is exhausted. By default, throws an {@link Exceptions#retryExhausted(String, Throwable)} with the
+	 * message reflecting the total attempt index, transien attempt index and maximum retry count.
+	 * The cause of the last {@link RetrySignal} is also added as the exception's cause.
+	 *
+	 * @param retryExhaustedGenerator the {@link Function} that generates the {@link Throwable} for the last
+	 * {@link RetrySignal}
+	 * @return the builder for further configuration
+	 */
+	public RetryBuilder onRetryExhaustedThrow(BiFunction<RetryBuilder, RetrySignal, Throwable> retryExhaustedGenerator) {
+		return new RetryBuilder(
+				this.maxAttempts,
+				this.throwablePredicate,
+				this.isTransientErrors,
+				this.doPreRetry,
+				this.doPostRetry,
+				this.asyncPreRetry,
+				this.asyncPostRetry,
+				Objects.requireNonNull(retryExhaustedGenerator, "retryExhaustedGenerator"));
 	}
 
 	/**
@@ -217,7 +263,8 @@ public final class RetryBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExhaustedGenerator);
 	}
 
 	//==========
@@ -228,7 +275,7 @@ public final class RetryBuilder implements Retry {
 	public Publisher<?> generateCompanion(Flux<RetrySignal> flux) {
 		return flux.flatMap(retryWhenState -> {
 			//capture the state immediately
-			Retry.RetrySignal copy = retryWhenState.retain();
+			RetrySignal copy = retryWhenState.retain();
 			Throwable currentFailure = copy.failure();
 			long iteration = isTransientErrors ? copy.failureSubsequentIndex() : copy.failureTotalIndex();
 
@@ -239,7 +286,7 @@ public final class RetryBuilder implements Retry {
 				return Mono.error(currentFailure);
 			}
 			else if (iteration >= maxAttempts) {
-				return Mono.error(Exceptions.retryExhausted(maxAttempts, currentFailure));
+				return Mono.error(retryExhaustedGenerator.apply(this, copy));
 			}
 			else {
 				return applyHooks(copy, Mono.just(iteration), doPreRetry, doPostRetry, asyncPreRetry, asyncPostRetry);
@@ -251,16 +298,12 @@ public final class RetryBuilder implements Retry {
 	// utility functions
 	//===================
 
-	static final Duration                                        MAX_BACKOFF      = Duration.ofMillis(Long.MAX_VALUE);
-	static final Consumer<RetrySignal>                           NO_OP_CONSUMER   = rs -> {};
-	static final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> NO_OP_BIFUNCTION = (rs, m) -> m;
-
-	static <T> Mono<T> applyHooks(Retry.RetrySignal copyOfSignal,
+	static <T> Mono<T> applyHooks(RetrySignal copyOfSignal,
 			Mono<T> originalCompanion,
-			final Consumer<Retry.RetrySignal> doPreRetry,
-			final Consumer<Retry.RetrySignal> doPostRetry,
-			final BiFunction<Retry.RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry,
-			final BiFunction<Retry.RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry) {
+			final Consumer<RetrySignal> doPreRetry,
+			final Consumer<RetrySignal> doPostRetry,
+			final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry,
+			final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry) {
 		if (doPreRetry != NO_OP_CONSUMER) {
 			try {
 				doPreRetry.accept(copyOfSignal);

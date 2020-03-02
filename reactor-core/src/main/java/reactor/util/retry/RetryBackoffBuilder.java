@@ -44,8 +44,8 @@ import reactor.core.scheduler.Schedulers;
  * and the number of attempts can also limited with {@link #maxAttempts(long)}.
  * When the maximum attempt of retries is reached, a runtime exception is propagated downstream which
  * can be pinpointed with {@link reactor.core.Exceptions#isRetryExhausted(Throwable)}. The cause of
- * the last attempt's failure is attached as said {@link reactor.core.Exceptions#retryExhausted(long, Throwable) retryExhausted}
- * exception's cause.
+ * the last attempt's failure is attached as said {@link reactor.core.Exceptions#retryExhausted(String, Throwable) retryExhausted}
+ * exception's cause. This can be customized with {@link #onRetryExhaustedThrow(BiFunction)}.
  * <p>
  * Additionally, to help dealing with bursts of transient errors in a long-lived Flux as if each burst
  * had its own backoff, one can choose to set {@link #transientErrors(boolean)} to {@code true}.
@@ -58,6 +58,14 @@ import reactor.core.scheduler.Schedulers;
  * @author Simon Baslé
  */
 public final class RetryBackoffBuilder implements Retry {
+
+	static final BiFunction<RetryBackoffBuilder, RetrySignal, Throwable> BACKOFF_EXCEPTION_GENERATOR = (builder, rs) ->
+			Exceptions.retryExhausted("Retries exhausted: " + rs.failureTotalIndex() + "/" + builder.maxAttempts +
+					(rs.failureSubsequentIndex() != rs.failureTotalIndex()
+							? " (" + rs.failureSubsequentIndex() + " in a row)"
+							: ""
+					), rs.failure());
+
 
 	final Duration  minBackoff;
 	final Duration  maxBackoff;
@@ -73,6 +81,8 @@ public final class RetryBackoffBuilder implements Retry {
 	final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry;
 	final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry;
 
+	final BiFunction<RetryBackoffBuilder, RetrySignal, Throwable> retryExceptionGenerator;
+
 	/**
 	 * Copy constructor.
 	 */
@@ -84,7 +94,8 @@ public final class RetryBackoffBuilder implements Retry {
 			Consumer<RetrySignal> doPreRetry,
 			Consumer<RetrySignal> doPostRetry,
 			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry,
-			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry) {
+			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry,
+			BiFunction<RetryBackoffBuilder, RetrySignal, Throwable> retryExceptionGenerator) {
 		this.maxAttempts = max;
 		this.throwablePredicate = aThrowablePredicate::test; //massaging type
 		this.isTransientErrors = isTransientErrors;
@@ -96,6 +107,7 @@ public final class RetryBackoffBuilder implements Retry {
 		this.doPostRetry = doPostRetry;
 		this.asyncPreRetry = asyncPreRetry;
 		this.asyncPostRetry = asyncPostRetry;
+		this.retryExceptionGenerator = retryExceptionGenerator;
 	}
 
 	/**
@@ -118,7 +130,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	/**
@@ -141,7 +154,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	/**
@@ -179,7 +193,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	public RetryBackoffBuilder andDoBeforeRetry(
@@ -195,7 +210,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry.andThen(doBeforeRetry),
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	public RetryBackoffBuilder andDoAfterRetry(Consumer<RetrySignal> doAfterRetry) {
@@ -210,7 +226,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry.andThen(doAfterRetry),
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	public RetryBackoffBuilder andDelayRetryWith(
@@ -226,7 +243,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				(rs, m) -> asyncPreRetry.apply(rs, m).then(doAsyncBeforeRetry.apply(rs)),
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	public RetryBackoffBuilder andRetryThen(
@@ -242,7 +260,35 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				(rs, m) -> asyncPostRetry.apply(rs, m).then(doAsyncAfterRetry.apply(rs)));
+				(rs, m) -> asyncPostRetry.apply(rs, m).then(doAsyncAfterRetry.apply(rs)),
+				this.retryExceptionGenerator);
+	}
+
+	/**
+	 * Set the generator for the {@link Exception} to be propagated when the maximum amount of retries
+	 * is exhausted. By default, throws an {@link Exceptions#retryExhausted(String, Throwable)} with the
+	 * message reflecting the total attempt index, transien attempt index and maximum retry count.
+	 * The cause of the last {@link RetrySignal} is also added as the exception's cause.
+	 *
+	 *
+	 * @param retryExhaustedGenerator the {@link Function} that generates the {@link Throwable} for the last
+	 * {@link RetrySignal}
+	 * @return the builder for further configuration
+	 */
+	public RetryBackoffBuilder onRetryExhaustedThrow(BiFunction<RetryBackoffBuilder, RetrySignal, Throwable> retryExhaustedGenerator) {
+		return new RetryBackoffBuilder(
+				this.maxAttempts,
+				this.throwablePredicate,
+				this.isTransientErrors,
+				this.minBackoff,
+				this.maxBackoff,
+				this.jitterFactor,
+				this.backoffScheduler,
+				this.doPreRetry,
+				this.doPostRetry,
+				this.asyncPreRetry,
+				this.asyncPostRetry,
+				Objects.requireNonNull(retryExhaustedGenerator, "retryExhaustedGenerator"));
 	}
 
 	/**
@@ -269,7 +315,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	/**
@@ -292,7 +339,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	/**
@@ -315,7 +363,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	/**
@@ -339,7 +388,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	/**
@@ -363,7 +413,8 @@ public final class RetryBackoffBuilder implements Retry {
 				this.doPreRetry,
 				this.doPostRetry,
 				this.asyncPreRetry,
-				this.asyncPostRetry);
+				this.asyncPostRetry,
+				this.retryExceptionGenerator);
 	}
 
 	//==========
@@ -393,7 +444,7 @@ public final class RetryBackoffBuilder implements Retry {
 			}
 
 			if (iteration >= maxAttempts) {
-				return Mono.error(Exceptions.retryExhausted(maxAttempts, currentFailure));
+				return Mono.error(retryExceptionGenerator.apply(this, copy));
 			}
 
 			Duration nextBackoff;

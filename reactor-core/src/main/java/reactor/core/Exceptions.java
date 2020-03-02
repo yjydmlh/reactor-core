@@ -28,6 +28,7 @@ import java.util.function.Supplier;
 
 import reactor.core.publisher.Flux;
 import reactor.util.annotation.Nullable;
+import reactor.util.retry.Retry;
 
 /**
  * Global Reactor Core Exception handling and utils to operate on.
@@ -279,30 +280,16 @@ public abstract class Exceptions {
 	}
 
 	/**
-	 * Return a new {@link RuntimeException} that represents too many failures on retry
-	 * (limited by a maximum number of attempts). This nature can be detected via
-	 * {@link #isRetryExhausted(Throwable)}. The cause of the last retry attempt is
-	 * passed and stored as this exception's {@link Throwable#getCause() cause}.
+	 * Return a new {@link RuntimeException} that represents too many failures on retry.
+	 * This nature can be detected via {@link #isRetryExhausted(Throwable)}.
+	 * The cause of the last retry attempt is passed and stored as this exception's {@link Throwable#getCause() cause}.
 	 *
-	 * @param after the number of attempts made at retrying, that all failed
-	 * @param cause the cause of the last retry attempt that failed
+	 * @param message the message
+	 * @param cause the cause of the last retry attempt that failed (or null if irrelevant)
 	 * @return a new {@link RuntimeException} representing retry exhaustion due to too many attempts
 	 */
-	public static RuntimeException retryExhausted(long after, Throwable cause) {
-		return new RetryExhaustedException("Retries exhausted: " + after + "/" + after, cause);
-	}
-
-	/**
-	 * Return a new {@link RuntimeException} that represents too many failures on retry
-	 * (limited by a timeout). This nature can be detected via {@link #isRetryExhausted(Throwable)}.
-	 * The cause of the last retry attempt is passed and stored as this exception's
-	 * {@link Throwable#getCause() cause}.
-	 *
-	 * @param timeout the maximum {@link Duration} that was allotted for retrying, which was gone over
-	 * @return a new {@link RuntimeException} representing retry exhaustion due to timeout
-	 */
-	public static RuntimeException retryExhausted(Duration timeout) {
-		return new RetryExhaustedException("Retries exhausted: timed out after " + timeout.toMillis() + "ms (" + timeout + ")");
+	public static RuntimeException retryExhausted(String message, @Nullable Throwable cause) {
+		return cause == null ? new RetryExhaustedException(message) : new RetryExhaustedException(message, cause);
 	}
 
 	/**
@@ -710,7 +697,7 @@ public abstract class Exceptions {
 	}
 
 	/**
-	 * A specialized {@link IllegalStateException} to signify a {@link Flux#retry(Supplier) retry}
+	 * A specialized {@link IllegalStateException} to signify a {@link Flux#retryWhen(Retry) retry}
 	 * has failed (eg. after N attempts, or a timeout).
 	 *
 	 * @see #retryExhausted(long, Throwable)
