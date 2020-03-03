@@ -28,34 +28,44 @@ import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxRetryWhenTest;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.StepVerifierOptions;
-import reactor.util.retry.Retry.RetrySignal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
-public class RetryBuilderTest {
+public class RetryBackoffSpecTest {
+
+	@Test
+	public void suppressingSchedulerFails() {
+		assertThatNullPointerException().isThrownBy(() -> Retry.backoff(1, Duration.ZERO).scheduler(null))
+		                                .withMessage("backoffScheduler");
+	}
 
 	@Test
 	public void builderMethodsProduceNewInstances() {
-		RetryBuilder init = Retry.max(1);
+		RetryBackoffSpec init = Retry.backoff(1, Duration.ZERO);
 		assertThat(init)
+				.isNotSameAs(init.minBackoff(Duration.ofSeconds(1)))
+				.isNotSameAs(init.maxBackoff(Duration.ZERO))
+				.isNotSameAs(init.jitter(0.5d))
+				.isNotSameAs(init.scheduler(Schedulers.parallel()))
 				.isNotSameAs(init.maxAttempts(10))
-				.isNotSameAs(init.throwablePredicate(t -> true))
-				.isNotSameAs(init.throwablePredicateModifiedWith(predicate -> predicate.and(t -> true)))
+				.isNotSameAs(init.filter(t -> true))
+				.isNotSameAs(init.modifyErrorFilter(predicate -> predicate.and(t -> true)))
 				.isNotSameAs(init.transientErrors(true))
-				.isNotSameAs(init.andDoBeforeRetry(rs -> {}))
-				.isNotSameAs(init.andDoAfterRetry(rs -> {}))
-				.isNotSameAs(init.andDelayRetryWith(rs -> Mono.empty()))
-				.isNotSameAs(init.andRetryThen(rs -> Mono.empty()))
-				.isNotSameAs(init.onRetryExhaustedThrow((b, rs) -> new IllegalStateException("boom")));
+				.isNotSameAs(init.doBeforeRetry(rs -> {}))
+				.isNotSameAs(init.doAfterRetry(rs -> {}))
+				.isNotSameAs(init.doBeforeRetryAsync(rs -> Mono.empty()))
+				.isNotSameAs(init.doAfterRetryAsync(rs -> Mono.empty()))
+				.isNotSameAs(init.onRetryExhaustedThrow((b, rs) -> new IllegalStateException("boon")));
 	}
 
 	@Test
 	public void builderCanBeUsedAsTemplate() {
 		//a base builder can be reused across several Flux with different tuning for each flux
-		RetryBuilder template = Retry.max(1).transientErrors(false);
+		RetryBackoffSpec template = Retry.backoff(1, Duration.ZERO).transientErrors(false);
 
 		Supplier<Flux<Integer>> transientError = () -> {
 			AtomicInteger errorOnEven = new AtomicInteger();
@@ -90,11 +100,11 @@ public class RetryBuilderTest {
 
 	@Test
 	public void throwablePredicateReplacesThePredicate() {
-		RetryBuilder retryBuilder = Retry.max(1)
-		                                 .throwablePredicate(t -> t instanceof RuntimeException)
-		                                 .throwablePredicate(t -> t instanceof IllegalStateException);
+		RetryBackoffSpec retryBuilder = Retry.backoff(1, Duration.ZERO)
+		                                     .filter(t -> t instanceof RuntimeException)
+		                                     .filter(t -> t instanceof IllegalStateException);
 
-		assertThat(retryBuilder.throwablePredicate)
+		assertThat(retryBuilder.errorFilter)
 				.accepts(new IllegalStateException())
 				.rejects(new IllegalArgumentException())
 				.rejects(new RuntimeException());
@@ -102,11 +112,11 @@ public class RetryBuilderTest {
 
 	@Test
 	public void throwablePredicateModifierAugmentsThePredicate() {
-		RetryBuilder retryBuilder = Retry.max(1)
-		                                 .throwablePredicate(t -> t instanceof RuntimeException)
-		                                 .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
+		RetryBackoffSpec retryBuilder = Retry.backoff(1, Duration.ZERO)
+		                                     .filter(t -> t instanceof RuntimeException)
+		                                     .modifyErrorFilter(p -> p.and(t -> t.getMessage().length() == 3));
 
-		assertThat(retryBuilder.throwablePredicate)
+		assertThat(retryBuilder.errorFilter)
 				.accepts(new IllegalStateException("foo"))
 				.accepts(new IllegalArgumentException("bar"))
 				.accepts(new RuntimeException("baz"))
@@ -115,10 +125,10 @@ public class RetryBuilderTest {
 
 	@Test
 	public void throwablePredicateModifierWorksIfNoPreviousPredicate() {
-		RetryBuilder retryBuilder = Retry.max(1)
-		                                 .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
+		RetryBackoffSpec retryBuilder = Retry.backoff(1, Duration.ZERO)
+		                                     .modifyErrorFilter(p -> p.and(t -> t.getMessage().length() == 3));
 
-		assertThat(retryBuilder.throwablePredicate)
+		assertThat(retryBuilder.errorFilter)
 				.accepts(new IllegalStateException("foo"))
 				.accepts(new IllegalArgumentException("bar"))
 				.accepts(new RuntimeException("baz"))
@@ -127,25 +137,25 @@ public class RetryBuilderTest {
 
 	@Test
 	public void throwablePredicateModifierRejectsNullGenerator() {
-		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).throwablePredicateModifiedWith(p -> null))
+		assertThatNullPointerException().isThrownBy(() -> Retry.backoff(1, Duration.ZERO).modifyErrorFilter(p -> null))
 		                                .withMessage("predicateAdjuster must return a new predicate");
 	}
 
 	@Test
 	public void throwablePredicateModifierRejectsNullFunction() {
-		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).throwablePredicateModifiedWith(null))
+		assertThatNullPointerException().isThrownBy(() -> Retry.backoff(1, Duration.ZERO).modifyErrorFilter(null))
 		                                .withMessage("predicateAdjuster");
 	}
 
 	@Test
 	public void doBeforeRetryIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBuilder retryBuilder = Retry
-				.max(1)
-				.andDoBeforeRetry(rs -> atomic.incrementAndGet())
-				.andDoBeforeRetry(rs -> atomic.addAndGet(100));
+		RetryBackoffSpec retryBuilder = Retry
+				.backoff(1, Duration.ZERO)
+				.doBeforeRetry(rs -> atomic.incrementAndGet())
+				.doBeforeRetry(rs -> atomic.addAndGet(100));
 
-		retryBuilder.doPreRetry.accept(null);
+		retryBuilder.syncPreRetry.accept(null);
 
 		assertThat(atomic).hasValue(101);
 	}
@@ -153,12 +163,12 @@ public class RetryBuilderTest {
 	@Test
 	public void doAfterRetryIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBuilder retryBuilder = Retry
-				.max(1)
-				.andDoAfterRetry(rs -> atomic.incrementAndGet())
-				.andDoAfterRetry(rs -> atomic.addAndGet(100));
+		RetryBackoffSpec retryBuilder = Retry
+				.backoff(1, Duration.ZERO)
+				.doAfterRetry(rs -> atomic.incrementAndGet())
+				.doAfterRetry(rs -> atomic.addAndGet(100));
 
-		retryBuilder.doPostRetry.accept(null);
+		retryBuilder.syncPostRetry.accept(null);
 
 		assertThat(atomic).hasValue(101);
 	}
@@ -166,10 +176,10 @@ public class RetryBuilderTest {
 	@Test
 	public void delayRetryWithIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBuilder retryBuilder = Retry
-				.max(1)
-				.andDelayRetryWith(rs -> Mono.fromRunnable(atomic::incrementAndGet))
-				.andDelayRetryWith(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
+		RetryBackoffSpec retryBuilder = Retry
+				.backoff(1, Duration.ZERO)
+				.doBeforeRetryAsync(rs -> Mono.fromRunnable(atomic::incrementAndGet))
+				.doBeforeRetryAsync(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
 
 		retryBuilder.asyncPreRetry.apply(null, Mono.empty()).block();
 
@@ -179,20 +189,19 @@ public class RetryBuilderTest {
 	@Test
 	public void retryThenIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBuilder retryBuilder = Retry
-				.max(1)
-				.andRetryThen(rs -> Mono.fromRunnable(atomic::incrementAndGet))
-				.andRetryThen(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
+		RetryBackoffSpec retryBuilder = Retry
+				.backoff(1, Duration.ZERO)
+				.doAfterRetryAsync(rs -> Mono.fromRunnable(atomic::incrementAndGet))
+				.doAfterRetryAsync(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
 
 		retryBuilder.asyncPostRetry.apply(null, Mono.empty()).block();
 
 		assertThat(atomic).hasValue(101);
 	}
 
-
 	@Test
 	public void retryExceptionDefaultsToRetryExhausted() {
-		RetryBuilder retryBuilder = Retry.max(50);
+		RetryBackoffSpec retryBuilder = Retry.backoff(50, Duration.ZERO);
 
 		final ImmutableRetrySignal trigger = new ImmutableRetrySignal(100, 21, new IllegalStateException("boom"));
 
@@ -205,28 +214,27 @@ public class RetryBuilderTest {
 
 	@Test
 	public void retryExceptionCanBeCustomized() {
-		RetryBuilder retryBuilder = Retry
-				.max(50)
-				.onRetryExhaustedThrow((builder, rs) -> new IllegalArgumentException("max" + builder.maxAttempts));
+		RetryBackoffSpec retryBuilder = Retry.backoff(1, Duration.ofMillis(123))
+		                                     .onRetryExhaustedThrow((builder, rs) -> new IllegalArgumentException(builder.minBackoff.toString()));
 
 		final ImmutableRetrySignal trigger = new ImmutableRetrySignal(100, 21, new IllegalStateException("boom"));
 
 		StepVerifier.create(retryBuilder.generateCompanion(Flux.just(trigger)))
 		            .expectErrorSatisfies(e -> assertThat(e).matches(t -> !Exceptions.isRetryExhausted(t), "is not retryExhausted")
-		                                                    .hasMessage("max50")
+		                                                    .hasMessage("PT0.123S")
 		                                                    .hasNoCause())
 		            .verify();
 	}
 
 	@Test
 	public void defaultRetryExhaustedMessageWithNoTransientErrors() {
-		assertThat(RetryBuilder.RETRY_EXCEPTION_GENERATOR.apply(Retry.max(123), new ImmutableRetrySignal(123, 123, null)))
+		assertThat(RetryBackoffSpec.BACKOFF_EXCEPTION_GENERATOR.apply(Retry.backoff(123, Duration.ZERO), new ImmutableRetrySignal(123, 123, null)))
 				.hasMessage("Retries exhausted: 123/123");
 	}
 
 	@Test
 	public void defaultRetryExhaustedMessageWithTransientErrors() {
-		assertThat(RetryBuilder.RETRY_EXCEPTION_GENERATOR.apply(Retry.max(123), new ImmutableRetrySignal(123, 12, null)))
+		assertThat(RetryBackoffSpec.BACKOFF_EXCEPTION_GENERATOR.apply(Retry.backoff(123, Duration.ZERO), new ImmutableRetrySignal(123, 12, null)))
 				.hasMessage("Retries exhausted: 123/123 (12 in a row)");
 	}
 
@@ -234,11 +242,11 @@ public class RetryBuilderTest {
 	public void companionWaitsForAllHooksBeforeTrigger() {
 		//this tests the companion directly, vs cumulatedRetryHooks which test full integration in the retryWhen operator
 		IllegalArgumentException ignored = new IllegalArgumentException("ignored");
-		RetrySignal sig1 = new ImmutableRetrySignal(1, 1, ignored);
-		RetrySignal sig2 = new ImmutableRetrySignal(2, 1, ignored);
-		RetrySignal sig3 = new ImmutableRetrySignal(3, 1, ignored);
+		Retry.RetrySignal sig1 = new ImmutableRetrySignal(1, 1, ignored);
+		Retry.RetrySignal sig2 = new ImmutableRetrySignal(2, 1, ignored);
+		Retry.RetrySignal sig3 = new ImmutableRetrySignal(3, 1, ignored);
 
-		RetryBuilder retryBuilder = Retry.max(10).andRetryThen(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.failureTotalIndex()))).then());
+		RetryBackoffSpec retryBuilder = Retry.backoff(10, Duration.ZERO).doAfterRetryAsync(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.failureTotalIndex()))).then());
 
 		StepVerifier.create(retryBuilder.generateCompanion(Flux.just(sig1, sig2, sig3).hide()))
 		            .expectNext(1L, 2L, 3L)
@@ -252,18 +260,18 @@ public class RetryBuilderTest {
 		AtomicInteger afterHookTracker = new AtomicInteger();
 
 		Retry retryBuilder = Retry
-				.max(1)
-				.andDoBeforeRetry(s -> order.add("SyncBefore A: " + s))
-				.andDoBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
-				.andDoAfterRetry(s -> order.add("SyncAfter A: " + s))
-				.andDoAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
-				.andDelayRetryWith(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
-				.andDelayRetryWith(s -> Mono.fromRunnable(() -> {
+				.backoff(1, Duration.ZERO)
+				.doBeforeRetry(s -> order.add("SyncBefore A: " + s))
+				.doBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
+				.doAfterRetry(s -> order.add("SyncAfter A: " + s))
+				.doAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
+				.doBeforeRetryAsync(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
+				.doBeforeRetryAsync(s -> Mono.fromRunnable(() -> {
 					order.add("AsyncBefore D");
 					beforeHookTracker.addAndGet(100);
 				}))
-				.andRetryThen(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
-				.andRetryThen(s -> Mono.fromRunnable(() -> {
+				.doAfterRetryAsync(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
+				.doAfterRetryAsync(s -> Mono.fromRunnable(() -> {
 					order.add("AsyncAfter D");
 					afterHookTracker.addAndGet(100);
 				}));
@@ -295,25 +303,27 @@ public class RetryBuilderTest {
 		AtomicInteger afterHookTracker = new AtomicInteger();
 
 		Retry retryBuilder = Retry
-				.maxInARow(2)
-				.andDoBeforeRetry(s -> order.add("SyncBefore A: " + s))
-				.andDoBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
-				.andDoAfterRetry(s -> order.add("SyncAfter A: " + s))
-				.andDoAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
-				.andDelayRetryWith(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
-				.andDelayRetryWith(s -> Mono.fromRunnable(() -> {
+				.backoff(2, Duration.ZERO)
+				.maxBackoff(Duration.ZERO)
+				.transientErrors(true)
+				.doBeforeRetry(s -> order.add("SyncBefore A: " + s))
+				.doBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
+				.doAfterRetry(s -> order.add("SyncAfter A: " + s))
+				.doAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
+				.doBeforeRetryAsync(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
+				.doBeforeRetryAsync(s -> Mono.fromRunnable(() -> {
 					order.add("AsyncBefore D");
 					beforeHookTracker.addAndGet(100);
 				}))
-				.andRetryThen(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
-				.andRetryThen(s -> Mono.fromRunnable(() -> {
+				.doAfterRetryAsync(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
+				.doAfterRetryAsync(s -> Mono.fromRunnable(() -> {
 					order.add("AsyncAfter D");
 					afterHookTracker.addAndGet(100);
 				}));
 
 		FluxRetryWhenTest.transientErrorSource()
-				.retryWhen(retryBuilder)
-				.blockLast();
+		                 .retryWhen(retryBuilder)
+		                 .blockLast();
 
 		assertThat(beforeHookTracker).as("before hooks cumulated").hasValue(606);
 		assertThat(afterHookTracker).as("after hooks cumulated").hasValue(606);

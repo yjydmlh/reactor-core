@@ -23,7 +23,7 @@ import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 
-import static reactor.util.retry.RetryBuilder.*;
+import static reactor.util.retry.RetrySpec.*;
 
 /**
  * Functional interface to configure retries depending on a companion {@link Flux} of {@link RetrySignal},
@@ -92,45 +92,45 @@ public interface Retry {
 	}
 
 	/**
-	 * A {@link RetryBackoffBuilder} preconfigured for exponential backoff strategy with jitter, given a maximum number of retry attempts
+	 * A {@link RetryBackoffSpec} preconfigured for exponential backoff strategy with jitter, given a maximum number of retry attempts
 	 * and a minimum {@link Duration} for the backoff.
 	 *
 	 * @param maxAttempts the maximum number of retry attempts to allow
 	 * @param minBackoff the minimum {@link Duration} for the first backoff
 	 * @return the builder for further configuration
-	 * @see RetryBackoffBuilder#maxAttempts(long)
-	 * @see RetryBackoffBuilder#minBackoff(Duration)
+	 * @see RetryBackoffSpec#maxAttempts(long)
+	 * @see RetryBackoffSpec#minBackoff(Duration)
 	 */
-	static RetryBackoffBuilder backoff(long maxAttempts, Duration minBackoff) {
-		return new RetryBackoffBuilder(maxAttempts, t -> true, false, minBackoff, MAX_BACKOFF, 0.5d, Schedulers.parallel(),
+	static RetryBackoffSpec backoff(long maxAttempts, Duration minBackoff) {
+		return new RetryBackoffSpec(maxAttempts, t -> true, false, minBackoff, MAX_BACKOFF, 0.5d, Schedulers.parallel(),
 				NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION,
-				RetryBackoffBuilder.BACKOFF_EXCEPTION_GENERATOR);
+				RetryBackoffSpec.BACKOFF_EXCEPTION_GENERATOR);
 	}
 
 	/**
-	 * A {@link RetryBuilder} preconfigured for a simple strategy with maximum number of retry attempts.
+	 * A {@link RetrySpec} preconfigured for a simple strategy with maximum number of retry attempts.
 	 *
 	 * @param max the maximum number of retry attempts to allow
 	 * @return the builder for further configuration
-	 * @see RetryBuilder#maxAttempts(long)
+	 * @see RetrySpec#maxAttempts(long)
 	 */
-	static RetryBuilder max(long max) {
-		return new RetryBuilder(max, t -> true, false, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION,
-				RetryBuilder.RETRY_EXCEPTION_GENERATOR);
+	static RetrySpec max(long max) {
+		return new RetrySpec(max, t -> true, false, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION,
+				RetrySpec.RETRY_EXCEPTION_GENERATOR);
 	}
 
 	/**
-	 * A {@link RetryBuilder} preconfigured for a simple strategy with maximum number of retry attempts over
+	 * A {@link RetrySpec} preconfigured for a simple strategy with maximum number of retry attempts over
 	 * subsequent transient errors. An {@link org.reactivestreams.Subscriber#onNext(Object)} between
-	 * errors resets the counter (see {@link RetryBuilder#transientErrors(boolean)}).
+	 * errors resets the counter (see {@link RetrySpec#transientErrors(boolean)}).
 	 *
 	 * @param maxInARow the maximum number of retry attempts to allow in a row, reset by successful onNext
 	 * @return the builder for further configuration
-	 * @see RetryBuilder#maxAttempts(long)
-	 * @see RetryBuilder#transientErrors(boolean)
+	 * @see RetrySpec#maxAttempts(long)
+	 * @see RetrySpec#transientErrors(boolean)
 	 */
-	static RetryBuilder maxInARow(long maxInARow) {
-		return new RetryBuilder(maxInARow, t -> true, true, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION,
+	static RetrySpec maxInARow(long maxInARow) {
+		return new RetrySpec(maxInARow, t -> true, true, NO_OP_CONSUMER, NO_OP_CONSUMER, NO_OP_BIFUNCTION, NO_OP_BIFUNCTION,
 				RETRY_EXCEPTION_GENERATOR);
 	}
 

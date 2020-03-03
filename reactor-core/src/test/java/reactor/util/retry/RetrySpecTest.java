@@ -28,29 +28,19 @@ import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxRetryWhenTest;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 import reactor.test.StepVerifierOptions;
+import reactor.util.retry.Retry.RetrySignal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 
-public class RetryBackoffBuilderTest {
-
-	@Test
-	public void suppressingSchedulerFails() {
-		assertThatNullPointerException().isThrownBy(() -> Retry.backoff(1, Duration.ZERO).scheduler(null))
-		                                .withMessage("backoffScheduler");
-	}
+public class RetrySpecTest {
 
 	@Test
 	public void builderMethodsProduceNewInstances() {
-		RetryBackoffBuilder init = Retry.backoff(1, Duration.ZERO);
+		RetrySpec init = Retry.max(1);
 		assertThat(init)
-				.isNotSameAs(init.minBackoff(Duration.ofSeconds(1)))
-				.isNotSameAs(init.maxBackoff(Duration.ZERO))
-				.isNotSameAs(init.jitter(0.5d))
-				.isNotSameAs(init.scheduler(Schedulers.parallel()))
 				.isNotSameAs(init.maxAttempts(10))
 				.isNotSameAs(init.throwablePredicate(t -> true))
 				.isNotSameAs(init.throwablePredicateModifiedWith(predicate -> predicate.and(t -> true)))
@@ -59,13 +49,13 @@ public class RetryBackoffBuilderTest {
 				.isNotSameAs(init.andDoAfterRetry(rs -> {}))
 				.isNotSameAs(init.andDelayRetryWith(rs -> Mono.empty()))
 				.isNotSameAs(init.andRetryThen(rs -> Mono.empty()))
-				.isNotSameAs(init.onRetryExhaustedThrow((b, rs) -> new IllegalStateException("boon")));
+				.isNotSameAs(init.onRetryExhaustedThrow((b, rs) -> new IllegalStateException("boom")));
 	}
 
 	@Test
 	public void builderCanBeUsedAsTemplate() {
 		//a base builder can be reused across several Flux with different tuning for each flux
-		RetryBackoffBuilder template = Retry.backoff(1, Duration.ZERO).transientErrors(false);
+		RetrySpec template = Retry.max(1).transientErrors(false);
 
 		Supplier<Flux<Integer>> transientError = () -> {
 			AtomicInteger errorOnEven = new AtomicInteger();
@@ -100,11 +90,11 @@ public class RetryBackoffBuilderTest {
 
 	@Test
 	public void throwablePredicateReplacesThePredicate() {
-		RetryBackoffBuilder retryBuilder = Retry.backoff(1, Duration.ZERO)
-		                                 .throwablePredicate(t -> t instanceof RuntimeException)
-		                                 .throwablePredicate(t -> t instanceof IllegalStateException);
+		RetrySpec retrySpec = Retry.max(1)
+		                           .throwablePredicate(t -> t instanceof RuntimeException)
+		                           .throwablePredicate(t -> t instanceof IllegalStateException);
 
-		assertThat(retryBuilder.throwablePredicate)
+		assertThat(retrySpec.throwablePredicate)
 				.accepts(new IllegalStateException())
 				.rejects(new IllegalArgumentException())
 				.rejects(new RuntimeException());
@@ -112,11 +102,11 @@ public class RetryBackoffBuilderTest {
 
 	@Test
 	public void throwablePredicateModifierAugmentsThePredicate() {
-		RetryBackoffBuilder retryBuilder = Retry.backoff(1, Duration.ZERO)
-		                                 .throwablePredicate(t -> t instanceof RuntimeException)
-		                                 .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
+		RetrySpec retrySpec = Retry.max(1)
+		                           .throwablePredicate(t -> t instanceof RuntimeException)
+		                           .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
 
-		assertThat(retryBuilder.throwablePredicate)
+		assertThat(retrySpec.throwablePredicate)
 				.accepts(new IllegalStateException("foo"))
 				.accepts(new IllegalArgumentException("bar"))
 				.accepts(new RuntimeException("baz"))
@@ -125,10 +115,10 @@ public class RetryBackoffBuilderTest {
 
 	@Test
 	public void throwablePredicateModifierWorksIfNoPreviousPredicate() {
-		RetryBackoffBuilder retryBuilder = Retry.backoff(1, Duration.ZERO)
-		                                 .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
+		RetrySpec retrySpec = Retry.max(1)
+		                           .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
 
-		assertThat(retryBuilder.throwablePredicate)
+		assertThat(retrySpec.throwablePredicate)
 				.accepts(new IllegalStateException("foo"))
 				.accepts(new IllegalArgumentException("bar"))
 				.accepts(new RuntimeException("baz"))
@@ -137,25 +127,25 @@ public class RetryBackoffBuilderTest {
 
 	@Test
 	public void throwablePredicateModifierRejectsNullGenerator() {
-		assertThatNullPointerException().isThrownBy(() -> Retry.backoff(1, Duration.ZERO).throwablePredicateModifiedWith(p -> null))
+		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).throwablePredicateModifiedWith(p -> null))
 		                                .withMessage("predicateAdjuster must return a new predicate");
 	}
 
 	@Test
 	public void throwablePredicateModifierRejectsNullFunction() {
-		assertThatNullPointerException().isThrownBy(() -> Retry.backoff(1, Duration.ZERO).throwablePredicateModifiedWith(null))
+		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).throwablePredicateModifiedWith(null))
 		                                .withMessage("predicateAdjuster");
 	}
 
 	@Test
 	public void doBeforeRetryIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBackoffBuilder retryBuilder = Retry
-				.backoff(1, Duration.ZERO)
+		RetrySpec retrySpec = Retry
+				.max(1)
 				.andDoBeforeRetry(rs -> atomic.incrementAndGet())
 				.andDoBeforeRetry(rs -> atomic.addAndGet(100));
 
-		retryBuilder.doPreRetry.accept(null);
+		retrySpec.doPreRetry.accept(null);
 
 		assertThat(atomic).hasValue(101);
 	}
@@ -163,12 +153,12 @@ public class RetryBackoffBuilderTest {
 	@Test
 	public void doAfterRetryIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBackoffBuilder retryBuilder = Retry
-				.backoff(1, Duration.ZERO)
+		RetrySpec retrySpec = Retry
+				.max(1)
 				.andDoAfterRetry(rs -> atomic.incrementAndGet())
 				.andDoAfterRetry(rs -> atomic.addAndGet(100));
 
-		retryBuilder.doPostRetry.accept(null);
+		retrySpec.doPostRetry.accept(null);
 
 		assertThat(atomic).hasValue(101);
 	}
@@ -176,12 +166,12 @@ public class RetryBackoffBuilderTest {
 	@Test
 	public void delayRetryWithIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBackoffBuilder retryBuilder = Retry
-				.backoff(1, Duration.ZERO)
+		RetrySpec retrySpec = Retry
+				.max(1)
 				.andDelayRetryWith(rs -> Mono.fromRunnable(atomic::incrementAndGet))
 				.andDelayRetryWith(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
 
-		retryBuilder.asyncPreRetry.apply(null, Mono.empty()).block();
+		retrySpec.asyncPreRetry.apply(null, Mono.empty()).block();
 
 		assertThat(atomic).hasValue(101);
 	}
@@ -189,23 +179,24 @@ public class RetryBackoffBuilderTest {
 	@Test
 	public void retryThenIsCumulative() {
 		AtomicInteger atomic = new AtomicInteger();
-		RetryBackoffBuilder retryBuilder = Retry
-				.backoff(1, Duration.ZERO)
+		RetrySpec retrySpec = Retry
+				.max(1)
 				.andRetryThen(rs -> Mono.fromRunnable(atomic::incrementAndGet))
 				.andRetryThen(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
 
-		retryBuilder.asyncPostRetry.apply(null, Mono.empty()).block();
+		retrySpec.asyncPostRetry.apply(null, Mono.empty()).block();
 
 		assertThat(atomic).hasValue(101);
 	}
 
+
 	@Test
 	public void retryExceptionDefaultsToRetryExhausted() {
-		RetryBackoffBuilder retryBuilder = Retry.backoff(50, Duration.ZERO);
+		RetrySpec retrySpec = Retry.max(50);
 
 		final ImmutableRetrySignal trigger = new ImmutableRetrySignal(100, 21, new IllegalStateException("boom"));
 
-		StepVerifier.create(retryBuilder.generateCompanion(Flux.just(trigger)))
+		StepVerifier.create(retrySpec.generateCompanion(Flux.just(trigger)))
 		            .expectErrorSatisfies(e -> assertThat(e).matches(Exceptions::isRetryExhausted, "isRetryExhausted")
 		                                                    .hasMessage("Retries exhausted: 100/50 (21 in a row)")
 		                                                    .hasCause(new IllegalStateException("boom")))
@@ -214,27 +205,28 @@ public class RetryBackoffBuilderTest {
 
 	@Test
 	public void retryExceptionCanBeCustomized() {
-		RetryBackoffBuilder retryBuilder = Retry.backoff(1, Duration.ofMillis(123))
-				.onRetryExhaustedThrow((builder, rs) -> new IllegalArgumentException(builder.minBackoff.toString()));
+		RetrySpec retrySpec = Retry
+				.max(50)
+				.onRetryExhaustedThrow((builder, rs) -> new IllegalArgumentException("max" + builder.maxAttempts));
 
 		final ImmutableRetrySignal trigger = new ImmutableRetrySignal(100, 21, new IllegalStateException("boom"));
 
-		StepVerifier.create(retryBuilder.generateCompanion(Flux.just(trigger)))
+		StepVerifier.create(retrySpec.generateCompanion(Flux.just(trigger)))
 		            .expectErrorSatisfies(e -> assertThat(e).matches(t -> !Exceptions.isRetryExhausted(t), "is not retryExhausted")
-		                                                    .hasMessage("PT0.123S")
+		                                                    .hasMessage("max50")
 		                                                    .hasNoCause())
 		            .verify();
 	}
 
 	@Test
 	public void defaultRetryExhaustedMessageWithNoTransientErrors() {
-		assertThat(RetryBackoffBuilder.BACKOFF_EXCEPTION_GENERATOR.apply(Retry.backoff(123, Duration.ZERO), new ImmutableRetrySignal(123, 123, null)))
+		assertThat(RetrySpec.RETRY_EXCEPTION_GENERATOR.apply(Retry.max(123), new ImmutableRetrySignal(123, 123, null)))
 				.hasMessage("Retries exhausted: 123/123");
 	}
 
 	@Test
 	public void defaultRetryExhaustedMessageWithTransientErrors() {
-		assertThat(RetryBackoffBuilder.BACKOFF_EXCEPTION_GENERATOR.apply(Retry.backoff(123, Duration.ZERO), new ImmutableRetrySignal(123, 12, null)))
+		assertThat(RetrySpec.RETRY_EXCEPTION_GENERATOR.apply(Retry.max(123), new ImmutableRetrySignal(123, 12, null)))
 				.hasMessage("Retries exhausted: 123/123 (12 in a row)");
 	}
 
@@ -242,13 +234,13 @@ public class RetryBackoffBuilderTest {
 	public void companionWaitsForAllHooksBeforeTrigger() {
 		//this tests the companion directly, vs cumulatedRetryHooks which test full integration in the retryWhen operator
 		IllegalArgumentException ignored = new IllegalArgumentException("ignored");
-		Retry.RetrySignal sig1 = new ImmutableRetrySignal(1, 1, ignored);
-		Retry.RetrySignal sig2 = new ImmutableRetrySignal(2, 1, ignored);
-		Retry.RetrySignal sig3 = new ImmutableRetrySignal(3, 1, ignored);
+		RetrySignal sig1 = new ImmutableRetrySignal(1, 1, ignored);
+		RetrySignal sig2 = new ImmutableRetrySignal(2, 1, ignored);
+		RetrySignal sig3 = new ImmutableRetrySignal(3, 1, ignored);
 
-		RetryBackoffBuilder retryBuilder = Retry.backoff(10, Duration.ZERO).andRetryThen(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.failureTotalIndex()))).then());
+		RetrySpec retrySpec = Retry.max(10).andRetryThen(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.failureTotalIndex()))).then());
 
-		StepVerifier.create(retryBuilder.generateCompanion(Flux.just(sig1, sig2, sig3).hide()))
+		StepVerifier.create(retrySpec.generateCompanion(Flux.just(sig1, sig2, sig3).hide()))
 		            .expectNext(1L, 2L, 3L)
 		            .verifyComplete();
 	}
@@ -260,7 +252,7 @@ public class RetryBackoffBuilderTest {
 		AtomicInteger afterHookTracker = new AtomicInteger();
 
 		Retry retryBuilder = Retry
-				.backoff(1, Duration.ZERO)
+				.max(1)
 				.andDoBeforeRetry(s -> order.add("SyncBefore A: " + s))
 				.andDoBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
 				.andDoAfterRetry(s -> order.add("SyncAfter A: " + s))
@@ -303,9 +295,7 @@ public class RetryBackoffBuilderTest {
 		AtomicInteger afterHookTracker = new AtomicInteger();
 
 		Retry retryBuilder = Retry
-				.backoff(2, Duration.ZERO)
-				.maxBackoff(Duration.ZERO)
-				.transientErrors(true)
+				.maxInARow(2)
 				.andDoBeforeRetry(s -> order.add("SyncBefore A: " + s))
 				.andDoBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
 				.andDoAfterRetry(s -> order.add("SyncAfter A: " + s))
@@ -322,8 +312,8 @@ public class RetryBackoffBuilderTest {
 				}));
 
 		FluxRetryWhenTest.transientErrorSource()
-		                 .retryWhen(retryBuilder)
-		                 .blockLast();
+				.retryWhen(retryBuilder)
+				.blockLast();
 
 		assertThat(beforeHookTracker).as("before hooks cumulated").hasValue(606);
 		assertThat(afterHookTracker).as("after hooks cumulated").hasValue(606);

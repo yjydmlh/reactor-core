@@ -41,19 +41,19 @@ import reactor.core.publisher.Mono;
  * The comparison to {@link #maxAttempts(long)} will then be done with the number of subsequent attempts
  * that failed without an {@link org.reactivestreams.Subscriber#onNext(Object) onNext} in between.
  * <p>
- * The {@link RetryBuilder} is copy-on-write and as such can be stored as a "template" and further configured
+ * The {@link RetrySpec} is copy-on-write and as such can be stored as a "template" and further configured
  * by different components without a risk of modifying the original configuration.
  *
  * @author Simon Baslé
  */
-public final class RetryBuilder implements Retry {
+public final class RetrySpec implements Retry {
 
 	static final Duration                                        MAX_BACKOFF                 = Duration.ofMillis(Long.MAX_VALUE);
 	static final Consumer<RetrySignal>                           NO_OP_CONSUMER              = rs -> {};
 	static final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> NO_OP_BIFUNCTION            = (rs, m) -> m;
 
 
-	static final BiFunction<RetryBuilder, RetrySignal, Throwable>
+	static final BiFunction<RetrySpec, RetrySignal, Throwable>
 			RETRY_EXCEPTION_GENERATOR = (builder, rs) ->
 			Exceptions.retryExhausted("Retries exhausted: " + rs.failureTotalIndex() + "/" + builder.maxAttempts +
 					(rs.failureSubsequentIndex() != rs.failureTotalIndex()
@@ -86,19 +86,19 @@ public final class RetryBuilder implements Retry {
 	final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry;
 	final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry;
 
-	final BiFunction<RetryBuilder, RetrySignal, Throwable> retryExhaustedGenerator;
+	final BiFunction<RetrySpec, RetrySignal, Throwable> retryExhaustedGenerator;
 
 	/**
 	 * Copy constructor.
 	 */
-	RetryBuilder(long max,
+	RetrySpec(long max,
 			Predicate<? super Throwable> aThrowablePredicate,
 			boolean isTransientErrors,
 			Consumer<RetrySignal> doPreRetry,
 			Consumer<RetrySignal> doPostRetry,
 			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry,
 			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry,
-			BiFunction<RetryBuilder, RetrySignal, Throwable> retryExhaustedGenerator) {
+			BiFunction<RetrySpec, RetrySignal, Throwable> retryExhaustedGenerator) {
 		this.maxAttempts = max;
 		this.throwablePredicate = aThrowablePredicate::test; //massaging type
 		this.isTransientErrors = isTransientErrors;
@@ -117,8 +117,8 @@ public final class RetryBuilder implements Retry {
 	 * @param maxAttempts the new retry attempt limit
 	 * @return the builder for further configuration
 	 */
-	public RetryBuilder maxAttempts(long maxAttempts) {
-		return new RetryBuilder(
+	public RetrySpec maxAttempts(long maxAttempts) {
+		return new RetrySpec(
 				maxAttempts,
 				this.throwablePredicate,
 				this.isTransientErrors,
@@ -137,8 +137,8 @@ public final class RetryBuilder implements Retry {
 	 * @param predicate the predicate to filter which exceptions can be retried
 	 * @return the builder for further configuration
 	 */
-	public RetryBuilder throwablePredicate(Predicate<? super Throwable> predicate) {
-		return new RetryBuilder(
+	public RetrySpec throwablePredicate(Predicate<? super Throwable> predicate) {
+		return new RetrySpec(
 				this.maxAttempts,
 				Objects.requireNonNull(predicate, "predicate"),
 				this.isTransientErrors,
@@ -157,10 +157,10 @@ public final class RetryBuilder implements Retry {
 	 * For example:
 	 * <pre><code>
 	 * //given
-	 * RetryBuilder retryTwiceIllegalArgument = Retry.max(2)
+	 * RetrySpec retryTwiceIllegalArgument = Retry.max(2)
 	 *     .throwablePredicate(e -> e instanceof IllegalArgumentException);
 	 *
-	 * RetryBuilder retryTwiceIllegalArgWithCause = retryTwiceIllegalArgument.throwablePredicate(old ->
+	 * RetrySpec retryTwiceIllegalArgWithCause = retryTwiceIllegalArgument.throwablePredicate(old ->
 	 *     old.and(e -> e.getCause() != null));
 	 * </code></pre>
 	 *
@@ -168,12 +168,12 @@ public final class RetryBuilder implements Retry {
 	 * currently in place {@link Predicate} (usually deriving from the old predicate).
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
-	public RetryBuilder throwablePredicateModifiedWith(
+	public RetrySpec throwablePredicateModifiedWith(
 			Function<Predicate<Throwable>, Predicate<? super Throwable>> predicateAdjuster) {
 		Objects.requireNonNull(predicateAdjuster, "predicateAdjuster");
 		Predicate<? super Throwable> newPredicate = Objects.requireNonNull(predicateAdjuster.apply(this.throwablePredicate),
 				"predicateAdjuster must return a new predicate");
-		return new RetryBuilder(
+		return new RetrySpec(
 				this.maxAttempts,
 				newPredicate,
 				this.isTransientErrors,
@@ -193,9 +193,9 @@ public final class RetryBuilder implements Retry {
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 * @see #andDelayRetryWith(Function) andDelayRetryWith for an asynchronous version
 	 */
-	public RetryBuilder andDoBeforeRetry(
+	public RetrySpec andDoBeforeRetry(
 			Consumer<RetrySignal> doBeforeRetry) {
-		return new RetryBuilder(
+		return new RetrySpec(
 				this.maxAttempts,
 				this.throwablePredicate,
 				this.isTransientErrors,
@@ -215,8 +215,8 @@ public final class RetryBuilder implements Retry {
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 * @see #andRetryThen(Function) andRetryThen for an asynchronous version
 	 */
-	public RetryBuilder andDoAfterRetry(Consumer<RetrySignal> doAfterRetry) {
-		return new RetryBuilder(
+	public RetrySpec andDoAfterRetry(Consumer<RetrySignal> doAfterRetry) {
+		return new RetrySpec(
 				this.maxAttempts,
 				this.throwablePredicate,
 				this.isTransientErrors,
@@ -234,9 +234,9 @@ public final class RetryBuilder implements Retry {
 	 * @param doAsyncBeforeRetry the asynchronous hook to execute before original retry trigger is emitted
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
-	public RetryBuilder andDelayRetryWith(
+	public RetrySpec andDelayRetryWith(
 			Function<RetrySignal, Mono<Void>> doAsyncBeforeRetry) {
-		return new RetryBuilder(
+		return new RetrySpec(
 				this.maxAttempts,
 				this.throwablePredicate,
 				this.isTransientErrors,
@@ -254,9 +254,9 @@ public final class RetryBuilder implements Retry {
 	 * @param doAsyncAfterRetry the asynchronous hook to execute after original retry trigger is emitted
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
-	public RetryBuilder andRetryThen(
+	public RetrySpec andRetryThen(
 			Function<RetrySignal, Mono<Void>> doAsyncAfterRetry) {
-		return new RetryBuilder(
+		return new RetrySpec(
 				this.maxAttempts,
 				this.throwablePredicate,
 				this.isTransientErrors,
@@ -277,8 +277,8 @@ public final class RetryBuilder implements Retry {
 	 * {@link RetrySignal}
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
-	public RetryBuilder onRetryExhaustedThrow(BiFunction<RetryBuilder, RetrySignal, Throwable> retryExhaustedGenerator) {
-		return new RetryBuilder(
+	public RetrySpec onRetryExhaustedThrow(BiFunction<RetrySpec, RetrySignal, Throwable> retryExhaustedGenerator) {
+		return new RetrySpec(
 				this.maxAttempts,
 				this.throwablePredicate,
 				this.isTransientErrors,
@@ -301,8 +301,8 @@ public final class RetryBuilder implements Retry {
 	 * @param isTransientErrors {@code true} to activate transient mode
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
-	public RetryBuilder transientErrors(boolean isTransientErrors) {
-		return new RetryBuilder(
+	public RetrySpec transientErrors(boolean isTransientErrors) {
+		return new RetrySpec(
 				this.maxAttempts,
 				this.throwablePredicate,
 				isTransientErrors,
