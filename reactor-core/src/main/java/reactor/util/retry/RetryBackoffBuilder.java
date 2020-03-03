@@ -64,15 +64,49 @@ public final class RetryBackoffBuilder implements Retry {
 							: ""
 					), rs.failure());
 
+	/**
+	 * The configured minimum backoff {@link Duration}.
+	 * @see #minBackoff(Duration)
+	 */
+	public final Duration  minBackoff;
 
-	final Duration  minBackoff;
-	final Duration  maxBackoff;
-	final double    jitterFactor;
-	final Scheduler backoffScheduler;
+	/**
+	 * The configured maximum backoff {@link Duration}.
+	 * @see #maxBackoff(Duration)
+	 */
+	public final Duration  maxBackoff;
 
-	final long                 maxAttempts;
-	final Predicate<Throwable> throwablePredicate;
-	final boolean              isTransientErrors;
+	/**
+	 * The configured jitter factor, as a {@code double}.
+	 * @see #jitter(double)
+	 */
+	public final double    jitterFactor;
+
+	/**
+	 * The configured {@link Scheduler} on which to execute backoffs.
+	 * @see #scheduler(Scheduler)
+	 */
+	public final Scheduler backoffScheduler;
+
+	/**
+	 * The configured maximum for retry attempts.
+	 *
+	 * @see #maxAttempts(long)
+	 */
+	public final long maxAttempts;
+
+	/**
+	 * The configured {@link Predicate} to filter which exceptions to retry.
+	 * @see #throwablePredicate(Predicate)
+	 * @see #throwablePredicateModifiedWith(Function)
+	 */
+	public final Predicate<Throwable> throwablePredicate;
+
+	/**
+	 * The configured transient error handling flag.
+	 * @see #transientErrors(boolean)
+	 */
+	public final boolean isTransientErrors;
 
 	final Consumer<RetrySignal>                           doPreRetry;
 	final Consumer<RetrySignal>                           doPostRetry;
