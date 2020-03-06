@@ -246,7 +246,7 @@ public class RetryBackoffSpecTest {
 		Retry.RetrySignal sig2 = new ImmutableRetrySignal(2, 1, ignored);
 		Retry.RetrySignal sig3 = new ImmutableRetrySignal(3, 1, ignored);
 
-		RetryBackoffSpec retryBuilder = Retry.backoff(10, Duration.ZERO).doAfterRetryAsync(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.failureTotalIndex()))).then());
+		RetryBackoffSpec retryBuilder = Retry.backoff(10, Duration.ZERO).doAfterRetryAsync(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.totalRetries()))).then());
 
 		StepVerifier.create(retryBuilder.generateCompanion(Flux.just(sig1, sig2, sig3).hide()))
 		            .expectNext(1L, 2L, 3L)

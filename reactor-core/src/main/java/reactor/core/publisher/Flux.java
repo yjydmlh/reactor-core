@@ -7270,7 +7270,7 @@ public abstract class Flux<T> implements CorePublisher<T> {
 	 * {@link org.reactivestreams.Subscriber#onError(Throwable) onError} or
 	 * {@link org.reactivestreams.Subscriber#onNext(Object) onNext}. If processed with a delay,
 	 * this could lead to the represented state being out of sync with the state at which the retry
-	 * was evaluated. Map it to {@link Retry.RetrySignal#retain()} right away to mediate this.
+	 * was evaluated. Map it to {@link Retry.RetrySignal#copy()} right away to mediate this.
 	 *
 	 * @param strategy a {@link Retry} strategy to configure retries, typically generated via one of the builders exposed on the class
 	 * @return a {@link Flux} that retries on onError

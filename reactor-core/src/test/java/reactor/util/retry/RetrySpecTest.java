@@ -238,7 +238,7 @@ public class RetrySpecTest {
 		RetrySignal sig2 = new ImmutableRetrySignal(2, 1, ignored);
 		RetrySignal sig3 = new ImmutableRetrySignal(3, 1, ignored);
 
-		RetrySpec retrySpec = Retry.max(10).doAfterRetryAsync(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.failureTotalIndex()))).then());
+		RetrySpec retrySpec = Retry.max(10).doAfterRetryAsync(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.totalRetries()))).then());
 
 		StepVerifier.create(retrySpec.generateCompanion(Flux.just(sig1, sig2, sig3).hide()))
 		            .expectNext(1L, 2L, 3L)

@@ -120,12 +120,12 @@ final class FluxRetryWhen<T> extends InternalFluxOperator<T, T> {
 		}
 
 		@Override
-		public long failureTotalIndex() {
+		public long totalRetries() {
 			return this.totalFailureIndex - 1;
 		}
 
 		@Override
-		public long failureSubsequentIndex() {
+		public long totalRetriesInARow() {
 			return this.subsequentFailureIndex - 1;
 		}
 

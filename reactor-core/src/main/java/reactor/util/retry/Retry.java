@@ -51,7 +51,7 @@ public interface Retry {
 	 * State for a {@link Flux#retryWhen(Retry) Flux retry} or {@link reactor.core.publisher.Mono#retryWhen(Retry) Mono retry}.
 	 * A flux of states is passed to the user, which gives information about the {@link #failure()} that potentially triggers
 	 * a retry as well as two indexes: the number of errors that happened so far (and were retried) and the same number,
-	 * but only taking into account <strong>subsequent</strong> errors (see {@link #failureSubsequentIndex()}).
+	 * but only taking into account <strong>subsequent</strong> errors (see {@link #totalRetriesInARow()}).
 	 */
 	interface RetrySignal {
 
@@ -61,7 +61,7 @@ public interface Retry {
 		 *
 		 * @return a 0-index for the error, since original subscription
 		 */
-		long failureTotalIndex();
+		long totalRetries();
 
 		/**
 		 * The ZERO BASED index number of this error since the beginning of the current burst of errors.
@@ -70,7 +70,7 @@ public interface Retry {
 		 *
 		 * @return a 0-index for the error in the current burst of subsequent errors
 		 */
-		long failureSubsequentIndex();
+		long totalRetriesInARow();
 
 		/**
 		 * The current {@link Throwable} that needs to be evaluated for retry.
@@ -80,14 +80,15 @@ public interface Retry {
 		Throwable failure();
 
 		/**
-		 * If this {@link RetrySignal} is a transient view of the state of the underlying retry subscriber,
-		 * return an immutable copy of that view that is guaranteed to be consistent with the time at which
-		 * this method is invoked.
+		 * Return an immutable copy of this {@link RetrySignal} which is guaranteed to give a consistent view
+		 * of the state at the time at which this method is invoked.
+		 * This is especially useful if this {@link RetrySignal} is a transient view of the state of the underlying
+		 * retry subscriber,
 		 *
 		 * @return an immutable copy of the current {@link RetrySignal}, always safe to use
 		 */
-		default RetrySignal retain() {
-			return new ImmutableRetrySignal(failureTotalIndex(), failureSubsequentIndex(), failure());
+		default RetrySignal copy() {
+			return new ImmutableRetrySignal(totalRetries(), totalRetriesInARow(), failure());
 		}
 	}
 

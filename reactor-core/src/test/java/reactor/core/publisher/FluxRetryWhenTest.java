@@ -326,7 +326,7 @@ public class FluxRetryWhenTest {
 			}
 		}).retryWhen((Retry) repeat -> repeat
 				.take(3)
-				.map(rs -> rs.failureTotalIndex() + 1)
+				.map(rs -> rs.totalRetries() + 1)
 				.flatMap(time -> Mono.delay(Duration.ofSeconds(time))));
 	}
 

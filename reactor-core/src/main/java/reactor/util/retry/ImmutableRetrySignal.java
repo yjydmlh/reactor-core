@@ -36,12 +36,12 @@ final class ImmutableRetrySignal implements Retry.RetrySignal {
 	}
 
 	@Override
-	public long failureTotalIndex() {
+	public long totalRetries() {
 		return this.failureTotalIndex;
 	}
 
 	@Override
-	public long failureSubsequentIndex() {
+	public long totalRetriesInARow() {
 		return this.failureSubsequentIndex;
 	}
 
@@ -51,7 +51,7 @@ final class ImmutableRetrySignal implements Retry.RetrySignal {
 	}
 
 	@Override
-	public Retry.RetrySignal retain() {
+	public Retry.RetrySignal copy() {
 		return this;
 	}
 

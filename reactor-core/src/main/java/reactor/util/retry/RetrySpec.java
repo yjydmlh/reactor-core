@@ -55,9 +55,9 @@ public final class RetrySpec implements Retry {
 
 	static final BiFunction<RetrySpec, RetrySignal, Throwable>
 			RETRY_EXCEPTION_GENERATOR = (builder, rs) ->
-			Exceptions.retryExhausted("Retries exhausted: " + rs.failureTotalIndex() + "/" + builder.maxAttempts +
-					(rs.failureSubsequentIndex() != rs.failureTotalIndex()
-							? " (" + rs.failureSubsequentIndex() + " in a row)"
+			Exceptions.retryExhausted("Retries exhausted: " + rs.totalRetries() + "/" + builder.maxAttempts +
+					(rs.totalRetriesInARow() != rs.totalRetries()
+							? " (" + rs.totalRetriesInARow() + " in a row)"
 							: ""
 					), rs.failure());
 
@@ -291,7 +291,7 @@ public final class RetrySpec implements Retry {
 
 	/**
 	 * Set the transient error mode, indicating that the strategy being built should use
-	 * {@link RetrySignal#failureSubsequentIndex()} rather than {@link RetrySignal#failureTotalIndex()}.
+	 * {@link RetrySignal#totalRetriesInARow()} rather than {@link RetrySignal#totalRetries()}.
 	 * Transient errors are errors that could occur in bursts but are then recovered from by
 	 * a retry (with one or more onNext signals) before another error occurs.
 	 * <p>
@@ -321,9 +321,9 @@ public final class RetrySpec implements Retry {
 	public Flux<Long> generateCompanion(Flux<RetrySignal> flux) {
 		return flux.concatMap(retryWhenState -> {
 			//capture the state immediately
-			RetrySignal copy = retryWhenState.retain();
+			RetrySignal copy = retryWhenState.copy();
 			Throwable currentFailure = copy.failure();
-			long iteration = isTransientErrors ? copy.failureSubsequentIndex() : copy.failureTotalIndex();
+			long iteration = isTransientErrors ? copy.totalRetriesInARow() : copy.totalRetries();
 
 			if (currentFailure == null) {
 				return Mono.error(new IllegalStateException("RetryWhenState#failure() not expected to be null"));
