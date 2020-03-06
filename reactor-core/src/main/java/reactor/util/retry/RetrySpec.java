@@ -70,10 +70,10 @@ public final class RetrySpec implements Retry {
 
 	/**
 	 * The configured {@link Predicate} to filter which exceptions to retry.
-	 * @see #throwablePredicate(Predicate)
-	 * @see #throwablePredicateModifiedWith(Function)
+	 * @see #filter(Predicate)
+	 * @see #modifyErrorFilter(Function)
 	 */
-	public final Predicate<Throwable> throwablePredicate;
+	public final Predicate<Throwable> errorFilter;
 
 	/**
 	 * The configured transient error handling flag.
@@ -100,7 +100,7 @@ public final class RetrySpec implements Retry {
 			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry,
 			BiFunction<RetrySpec, RetrySignal, Throwable> retryExhaustedGenerator) {
 		this.maxAttempts = max;
-		this.throwablePredicate = aThrowablePredicate::test; //massaging type
+		this.errorFilter = aThrowablePredicate::test; //massaging type
 		this.isTransientErrors = isTransientErrors;
 		this.doPreRetry = doPreRetry;
 		this.doPostRetry = doPostRetry;
@@ -120,7 +120,7 @@ public final class RetrySpec implements Retry {
 	public RetrySpec maxAttempts(long maxAttempts) {
 		return new RetrySpec(
 				maxAttempts,
-				this.throwablePredicate,
+				this.errorFilter,
 				this.isTransientErrors,
 				this.doPreRetry,
 				this.doPostRetry,
@@ -134,13 +134,13 @@ public final class RetrySpec implements Retry {
 	 * that don't pass the predicate will be propagated downstream and terminate the retry
 	 * sequence. Defaults to allowing retries for all exceptions.
 	 *
-	 * @param predicate the predicate to filter which exceptions can be retried
-	 * @return the builder for further configuration
+	 * @param errorFilter the predicate to filter which exceptions can be retried
+	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
-	public RetrySpec throwablePredicate(Predicate<? super Throwable> predicate) {
+	public RetrySpec filter(Predicate<? super Throwable> errorFilter) {
 		return new RetrySpec(
 				this.maxAttempts,
-				Objects.requireNonNull(predicate, "predicate"),
+				Objects.requireNonNull(errorFilter, "errorFilter"),
 				this.isTransientErrors,
 				this.doPreRetry,
 				this.doPostRetry,
@@ -150,7 +150,7 @@ public final class RetrySpec implements Retry {
 	}
 
 	/**
-	 * Allows to augment a previously {@link #throwablePredicate(Predicate) set} {@link Predicate} with
+	 * Allows to augment a previously {@link #filter(Predicate) set} {@link Predicate} with
 	 * a new condition to allow retries of some exception or not. This can typically be used with
 	 * {@link Predicate#and(Predicate)} to combine existing predicate(s) with a new one.
 	 * <p>
@@ -160,7 +160,7 @@ public final class RetrySpec implements Retry {
 	 * RetrySpec retryTwiceIllegalArgument = Retry.max(2)
 	 *     .throwablePredicate(e -> e instanceof IllegalArgumentException);
 	 *
-	 * RetrySpec retryTwiceIllegalArgWithCause = retryTwiceIllegalArgument.throwablePredicate(old ->
+	 * RetrySpec retryTwiceIllegalArgWithCause = retryTwiceIllegalArgument.modifyErrorFilter(old ->
 	 *     old.and(e -> e.getCause() != null));
 	 * </code></pre>
 	 *
@@ -168,10 +168,10 @@ public final class RetrySpec implements Retry {
 	 * currently in place {@link Predicate} (usually deriving from the old predicate).
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
-	public RetrySpec throwablePredicateModifiedWith(
+	public RetrySpec modifyErrorFilter(
 			Function<Predicate<Throwable>, Predicate<? super Throwable>> predicateAdjuster) {
 		Objects.requireNonNull(predicateAdjuster, "predicateAdjuster");
-		Predicate<? super Throwable> newPredicate = Objects.requireNonNull(predicateAdjuster.apply(this.throwablePredicate),
+		Predicate<? super Throwable> newPredicate = Objects.requireNonNull(predicateAdjuster.apply(this.errorFilter),
 				"predicateAdjuster must return a new predicate");
 		return new RetrySpec(
 				this.maxAttempts,
@@ -191,13 +191,13 @@ public final class RetrySpec implements Retry {
 	 *
 	 * @param doBeforeRetry the synchronous hook to execute before retry trigger is emitted
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
-	 * @see #andDelayRetryWith(Function) andDelayRetryWith for an asynchronous version
+	 * @see #doBeforeRetryAsync(Function) andDelayRetryWith for an asynchronous version
 	 */
-	public RetrySpec andDoBeforeRetry(
+	public RetrySpec doBeforeRetry(
 			Consumer<RetrySignal> doBeforeRetry) {
 		return new RetrySpec(
 				this.maxAttempts,
-				this.throwablePredicate,
+				this.errorFilter,
 				this.isTransientErrors,
 				this.doPreRetry.andThen(doBeforeRetry),
 				this.doPostRetry,
@@ -213,12 +213,12 @@ public final class RetrySpec implements Retry {
 	 *
 	 * @param doAfterRetry the synchronous hook to execute after retry trigger is started
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
-	 * @see #andRetryThen(Function) andRetryThen for an asynchronous version
+	 * @see #doAfterRetryAsync(Function) andRetryThen for an asynchronous version
 	 */
-	public RetrySpec andDoAfterRetry(Consumer<RetrySignal> doAfterRetry) {
+	public RetrySpec doAfterRetry(Consumer<RetrySignal> doAfterRetry) {
 		return new RetrySpec(
 				this.maxAttempts,
-				this.throwablePredicate,
+				this.errorFilter,
 				this.isTransientErrors,
 				this.doPreRetry,
 				this.doPostRetry.andThen(doAfterRetry),
@@ -229,16 +229,16 @@ public final class RetrySpec implements Retry {
 
 	/**
 	 * Add asynchronous behavior to be executed <strong>before</strong> the current retry trigger in the companion publisher,
-	 * delaying the resulting retry trigger with the additional {@link Mono}.
+	 * thus <strong>delaying</strong> the resulting retry trigger with the additional {@link Mono}.
 	 *
 	 * @param doAsyncBeforeRetry the asynchronous hook to execute before original retry trigger is emitted
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
-	public RetrySpec andDelayRetryWith(
+	public RetrySpec doBeforeRetryAsync(
 			Function<RetrySignal, Mono<Void>> doAsyncBeforeRetry) {
 		return new RetrySpec(
 				this.maxAttempts,
-				this.throwablePredicate,
+				this.errorFilter,
 				this.isTransientErrors,
 				this.doPreRetry,
 				this.doPostRetry,
@@ -249,16 +249,16 @@ public final class RetrySpec implements Retry {
 
 	/**
 	 * Add asynchronous behavior to be executed <strong>after</strong> the current retry trigger in the companion publisher,
-	 * delaying the resulting retry trigger with the additional {@link Mono}.
+	 * thus <strong>delaying</strong> the resulting retry trigger with the additional {@link Mono}.
 	 *
 	 * @param doAsyncAfterRetry the asynchronous hook to execute after original retry trigger is emitted
 	 * @return a new copy of the builder which can either be further configured or used as {@link Retry}
 	 */
-	public RetrySpec andRetryThen(
+	public RetrySpec doAfterRetryAsync(
 			Function<RetrySignal, Mono<Void>> doAsyncAfterRetry) {
 		return new RetrySpec(
 				this.maxAttempts,
-				this.throwablePredicate,
+				this.errorFilter,
 				this.isTransientErrors,
 				this.doPreRetry,
 				this.doPostRetry,
@@ -280,7 +280,7 @@ public final class RetrySpec implements Retry {
 	public RetrySpec onRetryExhaustedThrow(BiFunction<RetrySpec, RetrySignal, Throwable> retryExhaustedGenerator) {
 		return new RetrySpec(
 				this.maxAttempts,
-				this.throwablePredicate,
+				this.errorFilter,
 				this.isTransientErrors,
 				this.doPreRetry,
 				this.doPostRetry,
@@ -304,7 +304,7 @@ public final class RetrySpec implements Retry {
 	public RetrySpec transientErrors(boolean isTransientErrors) {
 		return new RetrySpec(
 				this.maxAttempts,
-				this.throwablePredicate,
+				this.errorFilter,
 				isTransientErrors,
 				this.doPreRetry,
 				this.doPostRetry,
@@ -328,7 +328,7 @@ public final class RetrySpec implements Retry {
 			if (currentFailure == null) {
 				return Mono.error(new IllegalStateException("RetryWhenState#failure() not expected to be null"));
 			}
-			else if (!throwablePredicate.test(currentFailure)) {
+			else if (!errorFilter.test(currentFailure)) {
 				return Mono.error(currentFailure);
 			}
 			else if (iteration >= maxAttempts) {

@@ -113,7 +113,7 @@ public final class RetryBackoffSpec implements Retry {
 	final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry;
 	final BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry;
 
-	final BiFunction<RetryBackoffSpec, RetrySignal, Throwable> retryExceptionGenerator;
+	final BiFunction<RetryBackoffSpec, RetrySignal, Throwable> retryExhaustedGenerator;
 
 	/**
 	 * Copy constructor.
@@ -127,7 +127,7 @@ public final class RetryBackoffSpec implements Retry {
 			Consumer<RetrySignal> doPostRetry,
 			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPreRetry,
 			BiFunction<RetrySignal, Mono<Void>, Mono<Void>> asyncPostRetry,
-			BiFunction<RetryBackoffSpec, RetrySignal, Throwable> retryExceptionGenerator) {
+			BiFunction<RetryBackoffSpec, RetrySignal, Throwable> retryExhaustedGenerator) {
 		this.maxAttempts = max;
 		this.errorFilter = aThrowablePredicate::test; //massaging type
 		this.isTransientErrors = isTransientErrors;
@@ -139,7 +139,7 @@ public final class RetryBackoffSpec implements Retry {
 		this.syncPostRetry = doPostRetry;
 		this.asyncPreRetry = asyncPreRetry;
 		this.asyncPostRetry = asyncPostRetry;
-		this.retryExceptionGenerator = retryExceptionGenerator;
+		this.retryExhaustedGenerator = retryExhaustedGenerator;
 	}
 
 	/**
@@ -163,7 +163,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -187,7 +187,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -226,7 +226,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -252,7 +252,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -277,7 +277,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry.andThen(doAfterRetry),
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -301,7 +301,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				(rs, m) -> asyncPreRetry.apply(rs, m).then(doAsyncBeforeRetry.apply(rs)),
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -325,7 +325,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				(rs, m) -> asyncPostRetry.apply(rs, m).then(doAsyncAfterRetry.apply(rs)),
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -380,7 +380,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -404,7 +404,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -428,7 +428,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -453,7 +453,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	/**
@@ -478,7 +478,7 @@ public final class RetryBackoffSpec implements Retry {
 				this.syncPostRetry,
 				this.asyncPreRetry,
 				this.asyncPostRetry,
-				this.retryExceptionGenerator);
+				this.retryExhaustedGenerator);
 	}
 
 	//==========
@@ -508,7 +508,7 @@ public final class RetryBackoffSpec implements Retry {
 			}
 
 			if (iteration >= maxAttempts) {
-				return Mono.error(retryExceptionGenerator.apply(this, copy));
+				return Mono.error(retryExhaustedGenerator.apply(this, copy));
 			}
 
 			Duration nextBackoff;

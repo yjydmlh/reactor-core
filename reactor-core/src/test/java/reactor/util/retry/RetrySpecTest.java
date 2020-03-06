@@ -42,13 +42,13 @@ public class RetrySpecTest {
 		RetrySpec init = Retry.max(1);
 		assertThat(init)
 				.isNotSameAs(init.maxAttempts(10))
-				.isNotSameAs(init.throwablePredicate(t -> true))
-				.isNotSameAs(init.throwablePredicateModifiedWith(predicate -> predicate.and(t -> true)))
+				.isNotSameAs(init.filter(t -> true))
+				.isNotSameAs(init.modifyErrorFilter(predicate -> predicate.and(t -> true)))
 				.isNotSameAs(init.transientErrors(true))
-				.isNotSameAs(init.andDoBeforeRetry(rs -> {}))
-				.isNotSameAs(init.andDoAfterRetry(rs -> {}))
-				.isNotSameAs(init.andDelayRetryWith(rs -> Mono.empty()))
-				.isNotSameAs(init.andRetryThen(rs -> Mono.empty()))
+				.isNotSameAs(init.doBeforeRetry(rs -> {}))
+				.isNotSameAs(init.doAfterRetry(rs -> {}))
+				.isNotSameAs(init.doBeforeRetryAsync(rs -> Mono.empty()))
+				.isNotSameAs(init.doAfterRetryAsync(rs -> Mono.empty()))
 				.isNotSameAs(init.onRetryExhaustedThrow((b, rs) -> new IllegalStateException("boom")));
 	}
 
@@ -91,10 +91,10 @@ public class RetrySpecTest {
 	@Test
 	public void throwablePredicateReplacesThePredicate() {
 		RetrySpec retrySpec = Retry.max(1)
-		                           .throwablePredicate(t -> t instanceof RuntimeException)
-		                           .throwablePredicate(t -> t instanceof IllegalStateException);
+		                           .filter(t -> t instanceof RuntimeException)
+		                           .filter(t -> t instanceof IllegalStateException);
 
-		assertThat(retrySpec.throwablePredicate)
+		assertThat(retrySpec.errorFilter)
 				.accepts(new IllegalStateException())
 				.rejects(new IllegalArgumentException())
 				.rejects(new RuntimeException());
@@ -103,10 +103,10 @@ public class RetrySpecTest {
 	@Test
 	public void throwablePredicateModifierAugmentsThePredicate() {
 		RetrySpec retrySpec = Retry.max(1)
-		                           .throwablePredicate(t -> t instanceof RuntimeException)
-		                           .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
+		                           .filter(t -> t instanceof RuntimeException)
+		                           .modifyErrorFilter(p -> p.and(t -> t.getMessage().length() == 3));
 
-		assertThat(retrySpec.throwablePredicate)
+		assertThat(retrySpec.errorFilter)
 				.accepts(new IllegalStateException("foo"))
 				.accepts(new IllegalArgumentException("bar"))
 				.accepts(new RuntimeException("baz"))
@@ -116,9 +116,9 @@ public class RetrySpecTest {
 	@Test
 	public void throwablePredicateModifierWorksIfNoPreviousPredicate() {
 		RetrySpec retrySpec = Retry.max(1)
-		                           .throwablePredicateModifiedWith(p -> p.and(t -> t.getMessage().length() == 3));
+		                           .modifyErrorFilter(p -> p.and(t -> t.getMessage().length() == 3));
 
-		assertThat(retrySpec.throwablePredicate)
+		assertThat(retrySpec.errorFilter)
 				.accepts(new IllegalStateException("foo"))
 				.accepts(new IllegalArgumentException("bar"))
 				.accepts(new RuntimeException("baz"))
@@ -127,13 +127,13 @@ public class RetrySpecTest {
 
 	@Test
 	public void throwablePredicateModifierRejectsNullGenerator() {
-		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).throwablePredicateModifiedWith(p -> null))
+		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).modifyErrorFilter(p -> null))
 		                                .withMessage("predicateAdjuster must return a new predicate");
 	}
 
 	@Test
 	public void throwablePredicateModifierRejectsNullFunction() {
-		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).throwablePredicateModifiedWith(null))
+		assertThatNullPointerException().isThrownBy(() -> Retry.max(1).modifyErrorFilter(null))
 		                                .withMessage("predicateAdjuster");
 	}
 
@@ -142,8 +142,8 @@ public class RetrySpecTest {
 		AtomicInteger atomic = new AtomicInteger();
 		RetrySpec retrySpec = Retry
 				.max(1)
-				.andDoBeforeRetry(rs -> atomic.incrementAndGet())
-				.andDoBeforeRetry(rs -> atomic.addAndGet(100));
+				.doBeforeRetry(rs -> atomic.incrementAndGet())
+				.doBeforeRetry(rs -> atomic.addAndGet(100));
 
 		retrySpec.doPreRetry.accept(null);
 
@@ -155,8 +155,8 @@ public class RetrySpecTest {
 		AtomicInteger atomic = new AtomicInteger();
 		RetrySpec retrySpec = Retry
 				.max(1)
-				.andDoAfterRetry(rs -> atomic.incrementAndGet())
-				.andDoAfterRetry(rs -> atomic.addAndGet(100));
+				.doAfterRetry(rs -> atomic.incrementAndGet())
+				.doAfterRetry(rs -> atomic.addAndGet(100));
 
 		retrySpec.doPostRetry.accept(null);
 
@@ -168,8 +168,8 @@ public class RetrySpecTest {
 		AtomicInteger atomic = new AtomicInteger();
 		RetrySpec retrySpec = Retry
 				.max(1)
-				.andDelayRetryWith(rs -> Mono.fromRunnable(atomic::incrementAndGet))
-				.andDelayRetryWith(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
+				.doBeforeRetryAsync(rs -> Mono.fromRunnable(atomic::incrementAndGet))
+				.doBeforeRetryAsync(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
 
 		retrySpec.asyncPreRetry.apply(null, Mono.empty()).block();
 
@@ -181,8 +181,8 @@ public class RetrySpecTest {
 		AtomicInteger atomic = new AtomicInteger();
 		RetrySpec retrySpec = Retry
 				.max(1)
-				.andRetryThen(rs -> Mono.fromRunnable(atomic::incrementAndGet))
-				.andRetryThen(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
+				.doAfterRetryAsync(rs -> Mono.fromRunnable(atomic::incrementAndGet))
+				.doAfterRetryAsync(rs -> Mono.fromRunnable(() -> atomic.addAndGet(100)));
 
 		retrySpec.asyncPostRetry.apply(null, Mono.empty()).block();
 
@@ -238,7 +238,7 @@ public class RetrySpecTest {
 		RetrySignal sig2 = new ImmutableRetrySignal(2, 1, ignored);
 		RetrySignal sig3 = new ImmutableRetrySignal(3, 1, ignored);
 
-		RetrySpec retrySpec = Retry.max(10).andRetryThen(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.failureTotalIndex()))).then());
+		RetrySpec retrySpec = Retry.max(10).doAfterRetryAsync(rs -> Mono.delay(Duration.ofMillis(100 * (3 - rs.failureTotalIndex()))).then());
 
 		StepVerifier.create(retrySpec.generateCompanion(Flux.just(sig1, sig2, sig3).hide()))
 		            .expectNext(1L, 2L, 3L)
@@ -253,17 +253,17 @@ public class RetrySpecTest {
 
 		Retry retryBuilder = Retry
 				.max(1)
-				.andDoBeforeRetry(s -> order.add("SyncBefore A: " + s))
-				.andDoBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
-				.andDoAfterRetry(s -> order.add("SyncAfter A: " + s))
-				.andDoAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
-				.andDelayRetryWith(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
-				.andDelayRetryWith(s -> Mono.fromRunnable(() -> {
+				.doBeforeRetry(s -> order.add("SyncBefore A: " + s))
+				.doBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
+				.doAfterRetry(s -> order.add("SyncAfter A: " + s))
+				.doAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
+				.doBeforeRetryAsync(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
+				.doBeforeRetryAsync(s -> Mono.fromRunnable(() -> {
 					order.add("AsyncBefore D");
 					beforeHookTracker.addAndGet(100);
 				}))
-				.andRetryThen(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
-				.andRetryThen(s -> Mono.fromRunnable(() -> {
+				.doAfterRetryAsync(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
+				.doAfterRetryAsync(s -> Mono.fromRunnable(() -> {
 					order.add("AsyncAfter D");
 					afterHookTracker.addAndGet(100);
 				}));
@@ -296,17 +296,17 @@ public class RetrySpecTest {
 
 		Retry retryBuilder = Retry
 				.maxInARow(2)
-				.andDoBeforeRetry(s -> order.add("SyncBefore A: " + s))
-				.andDoBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
-				.andDoAfterRetry(s -> order.add("SyncAfter A: " + s))
-				.andDoAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
-				.andDelayRetryWith(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
-				.andDelayRetryWith(s -> Mono.fromRunnable(() -> {
+				.doBeforeRetry(s -> order.add("SyncBefore A: " + s))
+				.doBeforeRetry(s -> order.add("SyncBefore B, tracking " + beforeHookTracker.incrementAndGet()))
+				.doAfterRetry(s -> order.add("SyncAfter A: " + s))
+				.doAfterRetry(s -> order.add("SyncAfter B, tracking " + afterHookTracker.incrementAndGet()))
+				.doBeforeRetryAsync(s -> Mono.delay(Duration.ofMillis(200)).doOnNext(n -> order.add("AsyncBefore C")).then())
+				.doBeforeRetryAsync(s -> Mono.fromRunnable(() -> {
 					order.add("AsyncBefore D");
 					beforeHookTracker.addAndGet(100);
 				}))
-				.andRetryThen(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
-				.andRetryThen(s -> Mono.fromRunnable(() -> {
+				.doAfterRetryAsync(s -> Mono.delay(Duration.ofMillis(150)).doOnNext(delayed -> order.add("AsyncAfter C " + s)).then())
+				.doAfterRetryAsync(s -> Mono.fromRunnable(() -> {
 					order.add("AsyncAfter D");
 					afterHookTracker.addAndGet(100);
 				}));
